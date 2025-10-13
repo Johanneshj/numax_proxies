@@ -1,0 +1,16 @@
+setup.py
+data_preparation/__init__.py
+data_preparation/prepare_data.py
+numax_proxies.egg-info/PKG-INFO
+numax_proxies.egg-info/SOURCES.txt
+numax_proxies.egg-info/dependency_links.txt
+numax_proxies.egg-info/requires.txt
+numax_proxies.egg-info/top_level.txt
+proxies/__init__.py
+proxies/numax_from_ACF.py
+proxies/ACF/__init__.py
+proxies/ACF/acf_plot.py
+proxies/ACF/collapse_acf_and_fit.py
+proxies/ACF/corr_acf_and_fft_acf.py
+proxies/ACF/normalize_spectrum.py
+proxies/ACF/two_dim_acf.py

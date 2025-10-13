@@ -45,7 +45,7 @@ def get_lightcurve(*args):
         )[0][0]
 
         search_results = lk.search_lightcurve(target=id, mission=mission, cadence=cadence, author=author)
-        return search_results.download_all().stitch()
+        return search_results.download_all().stitch(), id
 
     # -------------------------------
     # Case 3: Arrays (time, flux, optional flux_err)
