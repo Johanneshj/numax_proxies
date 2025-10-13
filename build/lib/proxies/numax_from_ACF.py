@@ -46,8 +46,7 @@ class NumaxFromACF:
         plot_spec(self._pg.frequency.value, 
                   self._pg.power.value,
                   self._filter,
-                  ax=axs[0],
-                  id=self._id)
+                  ax=axs[0])
         plot_2D_ACF(self._2D_ACF,
                     self._pg.frequency.value,
                     ax=axs[1])

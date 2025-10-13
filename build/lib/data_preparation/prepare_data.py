@@ -1,7 +1,6 @@
 import numpy as np
 import lightkurve as lk
 from collections import Counter
-import json
 
 
 def get_lightcurve(*args):
@@ -14,8 +13,6 @@ def get_lightcurve(*args):
     Returns:
         lightkurve.LightCurve
     """
-
-
     priority = ['KASOC', 'Kepler', 'TASOC', 'SPOC', 'TGLC', 'QLP']
     # -------------------------------
     # Case 1: No arguments -> fallback
@@ -27,39 +24,13 @@ def get_lightcurve(*args):
                                               quarter=np.arange(0, 60))
         id = 'KIC12008916'
         return search_results.download_all().stitch(), id
-    
-    # -------------------------------
-    # Case 3: JSON file
-    json_args = [a for a in args if isinstance(a, str) and a.endswith('.json')]
-    if len(json_args) > 0:
-        with open(json_args[0], 'r') as f:
-            cfg = json.load(f)
-        id = cfg.get('target')
-        cadence = cfg.get('cadence', 'long')
-        author = cfg.get('author', None)
-        quarter = cfg.get('quarter', None)
-        sector = cfg.get('sector', None)
 
-        mission = 'Kepler' if 'KIC' in id.upper() else 'TESS'
-
-        kwargs = dict(target=id, mission=mission, cadence=cadence)
-        if author: kwargs['author'] = author
-        if quarter: kwargs['quarter'] = quarter
-        if sector: kwargs['sector'] = sector
-
-        search_results = lk.search_lightcurve(**kwargs)
-        if len(search_results) == 0:
-            raise ValueError(f"No light curves found for {id} ({mission}).")
-
-        return search_results.download_all().stitch(), id
     # -------------------------------
     # Case 2: ID string (+ optional cadence)
     str_args = [a for a in args if isinstance(a, str)]
     if len(str_args) > 0:
         id = str_args[0]
-        print(str_args)
-        print(len(str_args))
-        cadence = str_args[1] if len(str_args) > 0 else 'long'
+        cadence = str_args[1] if len(str_args) > 1 else 'long'
         mission = 'Kepler' if 'KIC' in id.upper() else 'TESS'
 
         search_results = lk.search_lightcurve(target=id, mission=mission, cadence=cadence)
@@ -72,14 +43,8 @@ def get_lightcurve(*args):
             most_common,
             key=lambda x: (priority.index(x[0]) if x[0] in priority else len(priority), -x[1])
         )[0][0]
-        print(author, mission, cadence, id)
 
-        search_results = lk.search_lightcurve(target=id, 
-                                              mission=mission, 
-                                              cadence=cadence, 
-                                              author=author,
-                                              quarter=np.arange(10,15)
-                                              )
+        search_results = lk.search_lightcurve(target=id, mission=mission, cadence=cadence, author=author)
         return search_results.download_all().stitch(), id
 
     # -------------------------------
@@ -103,14 +68,8 @@ def prepare_lightcurve(lc=None, *args, **kwargs):
     else:
         lc = lc.remove_nans().remove_outliers(5)
 
-    time = lc.time.value
-    flux = lc.flux.value
-    sort_idx = np.argsort(time)
-    time = time[sort_idx]
-    flux = flux[sort_idx]
-    
-    time -= time[0]
-    flux = (flux - 1)*1e6
+    flux = (lc.flux - 1)*1e6
+    time = lc.time.value - lc.time.value[0]
 
     gap_indices = np.concatenate((np.where(np.diff(time) > 3)[0], [len(time)-1]))
     gap = 0

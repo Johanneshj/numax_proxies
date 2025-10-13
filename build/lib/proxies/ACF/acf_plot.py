@@ -2,13 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
-def plot_spec(frequency, power, smoothed_power, ax, id):
+def plot_spec(frequency, power, smoothed_power, ax):
     ax.loglog(frequency, power, c='gray', label='original spectrum')
     ax.loglog(frequency, smoothed_power, c='k', label='median filtered')
     ax.set_xlabel('frequency [μHz]')
     ax.set_ylabel('power spectral density')
     ax.set_xlim(min(frequency), max(frequency))
-    ax.text(0.02, 0.02, f'{id}', ha='left', va='bottom', transform=ax.transAxes)
     ax.legend()
 
 def plot_2D_ACF(ACF, frequency, ax):
@@ -34,7 +33,6 @@ def plot_collapsed_acf_with_gaussian_fit(collapsed_2D_acf, freq_centers, fit_val
     x = np.linspace(min(freq_centers), max(freq_centers), 100)
     ax.plot(freq_centers, collapsed_2D_acf, c='k', marker='.', label='collapsed 2D ACF')
     ax.plot(x, gaussian(x, *fit_vals), c='r', label='Gaussian fit')
-    ax.axvline(fit_vals[2], c='gray', ls='--', label=f'numax = {np.round(fit_vals[2],2)}')
     ax.set_xlabel('frequency [μHz]')
     ax.set_ylabel('A.U.')
     ax.legend()

@@ -9,6 +9,7 @@ class FreqProxy:
 
         # Preprocess and compute periodogram
         self._lc = prepare_lightcurve(self._lc)
+        print(self._lc)
         self._pg = calculate_psd(self._lc)
 
         # Frequency proxies container
