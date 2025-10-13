@@ -1,7 +1,7 @@
 from .data_preparation import get_lightcurve, prepare_lightcurve, calculate_psd
 from .proxies.numax_from_ACF import NumaxFromACF
 
-class FreqProxy:
+class NumaxProxies:
     #This happens when you create (initialize) the class i.e. class = FreqProxy(args,kwargs) somewhere
     def __init__(self, *args, **kwargs):
         # Fetch light curve (from ID or arrays)
