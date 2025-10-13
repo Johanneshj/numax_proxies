@@ -1,10 +1,13 @@
 # Numax Proxies
 
 **Numax Proxies** fetches and prepares stellar light curves from the *Kepler* and *TESS* missions.  
-By various methods $nu_\text{max}$ estimates are calculated.
+By various methods $\nu_\text{max}$ estimates are calculated.
 
 ---
-
+## 🤓 Methods
+  1. **2D ACF:**
+    - Follows the methodology of Huber+ 2009 and Viani+ 2019
+    - Computes 2D ACF from PSD $\rightarrow$ collapsed the ACF to 1D $\rightarrow$ fits Gaussian to estimate $\nu_\text{max}$.
 ## 🌟 Features
 
 - **Flexible input options** — works with:
