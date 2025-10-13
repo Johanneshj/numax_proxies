@@ -1,5 +1,6 @@
 import numpy as np
 import lightkurve as lk
+from collections import Counter
 
 
 def get_lightcurve(*args):
@@ -12,15 +13,15 @@ def get_lightcurve(*args):
     Returns:
         lightkurve.LightCurve
     """
+    priority = ['KASOC', 'Kepler', 'TASOC', 'SPOC', 'TGLC', 'QLP']
     # -------------------------------
     # Case 1: No arguments -> fallback
     if len(args) == 0:
-        search_results = lk.search_lightcurve('KIC 12008916',
+        search_results = lk.search_lightcurve('KIC12008916',
                                               mission='Kepler',
                                               cadence='long',
                                               author='Kepler',
                                               quarter=np.arange(0, 60))
-        #author = search_results.author.value_counts().idxmax()
         id = 'KIC12008916'
         return search_results.download_all().stitch(), id
 
@@ -36,8 +37,15 @@ def get_lightcurve(*args):
         if len(search_results) == 0:
             raise ValueError(f"No light curves found for {id} ({mission}).")
 
-        author = search_results.author.value_counts().idxmax()
-        return search_results(author=author).download_all().stitch()
+        author_counts = Counter(search_results.author)
+        most_common = author_counts.most_common()
+        author = sorted(
+            most_common,
+            key=lambda x: (priority.index(x[0]) if x[0] in priority else len(priority), -x[1])
+        )[0][0]
+
+        search_results = lk.search_lightcurve(target=id, mission=mission, cadence=cadence, author=author)
+        return search_results.download_all().stitch()
 
     # -------------------------------
     # Case 3: Arrays (time, flux, optional flux_err)
