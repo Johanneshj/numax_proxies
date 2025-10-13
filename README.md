@@ -60,6 +60,7 @@ proxy.compute_acf()
 - **ACF** - improvements:
   - Huber+ 2009 bins spectrum in evenly spaced log bins, Viana+ 2019 simply smooths with a window size of 10 and 100 muHz for long and short cadence data respectively. **What's the best approach?**
   - **Plotting 2D ACF map is computationally heavy** - can it be faster?
+    - *Example - 4-year Kepler SC lightcurve:* ACF computation takes 1 minute, with plotting ~5 minutes.
   - **ACF calculation becomes demanding for long time-series** - clever workaround?
  
 ---
