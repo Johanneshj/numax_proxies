@@ -15,7 +15,7 @@ def plot_2D_ACF(ACF, frequency, ax):
     if np.max(frequency) > 300:
         window_size_muHz = 249
     else:
-        window_size_muHz = 40
+        window_size_muHz = 49
     ax.imshow(ACF.T,
                 cmap='Greys_r',
                 aspect='auto',

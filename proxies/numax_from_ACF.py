@@ -55,6 +55,6 @@ class NumaxFromACF:
                                              self._freq_centers,
                                              self._fit_vals,
                                              ax=axs[2])
-        savepath = os.path.join(self._id, 'figures', 'numax_proxies')
+        savepath = os.path.join('numax_proxies', 'results', self._id, 'figures')
         os.makedirs(savepath, exist_ok=True)
         fig.savefig(f'{savepath}/ACF.png', dpi=300, bbox_inches='tight')
