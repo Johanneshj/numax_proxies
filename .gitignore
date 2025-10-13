@@ -1,4 +1,6 @@
 __pycache__/
 tool.ipynb
-numax_proxies.egg-info
+*.egg-info/
 test.ipynb
+build/
+dist/
