@@ -10,6 +10,7 @@
   - More to come...
     - Scaling relations
     - Coeffecients of variation.
+    - Entropy.
     - etc...
    
 ## ⚙️ Installation
