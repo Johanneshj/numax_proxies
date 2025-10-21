@@ -4,7 +4,7 @@ from matplotlib.colors import LogNorm
 
 def plot_spec(frequency, power, smoothed_power, ax, id):
     ax.loglog(frequency, power, c='gray', label='original spectrum')
-    ax.loglog(frequency, smoothed_power, c='k', label='median filtered')
+    ax.loglog(frequency, smoothed_power, c='k', label='median filter')
     ax.set_xlabel('frequency [μHz]')
     ax.set_ylabel('power spectral density')
     ax.set_xlim(min(frequency), max(frequency))

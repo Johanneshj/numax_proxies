@@ -8,7 +8,10 @@ class NumaxProxies:
         self._lc, self._id = get_lightcurve(*args, **kwargs)
 
         # Preprocess and compute periodogram
-        self._lc = prepare_lightcurve(self._lc)
+        self._savgol_iters = kwargs.pop("savgol_iters", 0)
+        self._lc = prepare_lightcurve(self._lc, self._id, 
+                                      plot=True, savgol=True,
+                                      savgol_iters=self._savgol_iters)
         self._pg = calculate_psd(self._lc)
 
         # Frequency proxies container
