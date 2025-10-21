@@ -69,7 +69,10 @@ proxy.compute_acf()
   - **Plotting 2D ACF map is computationally heavy** - can it be faster?
     - *Example - 4-year Kepler SC lightcurve:* ACF computation takes 1 minute, with plotting ~5 minutes.
   - **ACF calculation becomes demanding for long time-series** - clever workaround?
- 
+  - **Implement average PSD**.
+  - **Handle if Gaussian fit can't be done** - sometimes fail at fitting Gaussian...
+- **General cleanup:**
+    - make data prep more clean. 
 ---
 ## 📈 Example Results
 Example of ACF method
