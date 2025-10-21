@@ -54,7 +54,7 @@ proxy.compute_acf()
   - a **default example star** if no input is given.
 - **Automatic source prioritization** - selects data based on coverage and author (e.g., KASOC, Kepler, TASOC, SPOC, etc.).
 - **LightKurve backend** — leverages [Lightkurve](https://docs.lightkurve.org/) for searching and downloading mission data.
-- **Savgol smoothin** - sometimes useful - polyorder is always 2 and window length is half amount of data points contained in period at maximum power.
+- **Savgol smoothing** - sometimes useful - polyorder is always 2 and window length is half amount of data points contained in period at maximum power.
 ```python
 # For example
 proxy = NumaxProxies("KIC12008916.json", savgol_iters=2)
