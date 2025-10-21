@@ -71,8 +71,10 @@ proxy.compute_acf()
   - **ACF calculation becomes demanding for long time-series** - clever workaround?
   - **Implement average PSD**.
   - **Handle if Gaussian fit can't be done** - sometimes fail at fitting Gaussian...
-- **General cleanup:**
-    - make data prep more clean. 
+- **General:**
+    - make data prep more clean.
+    - plot PSD with all numax estimates as vertical lines (with uncertainties?).
+
 ---
 ## 📈 Example Results
 Example of ACF method
