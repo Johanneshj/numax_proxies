@@ -56,7 +56,7 @@ proxy.compute_acf()
 - **LightKurve backend** — leverages [Lightkurve](https://docs.lightkurve.org/) for searching and downloading mission data.
 - **Savgol smoothin** - sometimes useful - polyorder is always 2 and window length is half amount of data points contained in period at maximum power.
 ```python
-# For examlpe
+# For example
 proxy = NumaxProxies("KIC12008916.json", savgol_iters=2)
 proxy.compute_acf()
 ```
