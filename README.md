@@ -54,6 +54,12 @@ proxy.compute_acf()
   - a **default example star** if no input is given.
 - **Automatic source prioritization** - selects data based on coverage and author (e.g., KASOC, Kepler, TASOC, SPOC, etc.).
 - **LightKurve backend** — leverages [Lightkurve](https://docs.lightkurve.org/) for searching and downloading mission data.
+- **Savgol smoothing** - sometimes useful - polyorder is always 2 and window length is half amount of data points contained in period at maximum power. savgol_iters=n means smoothing iteratively **n** times.
+```python
+# For example
+proxy = NumaxProxies("KIC12008916.json", savgol_iters=2)
+proxy.compute_acf()
+```
 
 ---
 ## ⚠️ To-do
@@ -63,7 +69,12 @@ proxy.compute_acf()
   - **Plotting 2D ACF map is computationally heavy** - can it be faster?
     - *Example - 4-year Kepler SC lightcurve:* ACF computation takes 1 minute, with plotting ~5 minutes.
   - **ACF calculation becomes demanding for long time-series** - clever workaround?
- 
+  - **Implement average PSD**.
+  - **Handle if Gaussian fit can't be done** - sometimes fail at fitting Gaussian...
+- **General:**
+    - make data prep more clean.
+    - plot PSD with all numax estimates as vertical lines (with uncertainties?).
+
 ---
 ## 📈 Example Results
 Example of ACF method
