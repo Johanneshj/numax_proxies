@@ -43,6 +43,9 @@ with open("KIC12008916.json", "w") as f:
 ```python
 proxy = NumaxProxies("KIC12008916.json")
 proxy.compute_acf()
+
+### or if light curve csv-file is provided
+proxy = NumaxProxies("stars/KIC1435467.json", lc_file='path_to_lightcurve.csv'
 ```
 
 --- 
@@ -50,7 +53,7 @@ proxy.compute_acf()
 - **Flexible input options** — works with:
   - a simple **target ID** (`KICXXXXXX` or `TICXXXXXXX`),
   - a detailed **JSON configuration file**,
-  - direct **time and flux arrays**, or
+  - direct **time and flux csv files**, or
   - a **default example star** if no input is given.
 - **Automatic source prioritization** - selects data based on coverage and author (e.g., KASOC, Kepler, TASOC, SPOC, etc.).
 - **LightKurve backend** — leverages [Lightkurve](https://docs.lightkurve.org/) for searching and downloading mission data.
@@ -72,6 +75,7 @@ proxy.compute_acf()
     - Implemented mean PSD; ACF calculation now takes < 1 sec for 4 year Kepler SC light curve.
   - **Handle if Gaussian fit can't be done** - sometimes fail at fitting Gaussian...
 - **General:**
+    - Savgol filtering is nice, but currently takes ~20 seconds each iteration...
     - make data prep more clean.
     - plot PSD with all numax estimates as vertical lines (with uncertainties?).
 
