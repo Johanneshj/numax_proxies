@@ -2,6 +2,7 @@ import numpy as np
 import lightkurve as lk
 from collections import Counter
 import json
+import time as t
 
 
 def get_lightcurve(*args, **kwargs):
@@ -15,8 +16,6 @@ def get_lightcurve(*args, **kwargs):
         lightkurve.LightCurve
     """
 
-
-    
     # -------------------------------
     # Case 1: No arguments -> fallback
     if len(args) == 0:
@@ -28,25 +27,28 @@ def get_lightcurve(*args, **kwargs):
         id = 'KIC12008916'
         return search_results.download_all().stitch(), id
     
-    # -------------------------------
-    # Case 3: JSON file
-    json_args = [a for a in args if isinstance(a, str) and a.endswith('.json')]
-    if len(json_args) > 0:
-        with open(json_args[0], 'r') as f:
-            cfg = json.load(f)
-        id = cfg.get('target')
-        cadence = cfg.get('cadence', 'long')
-        author = cfg.get('author', None)
-        quarter = cfg.get('quarter', None)
-        sector = cfg.get('sector', None)
-
-        mission = 'Kepler' if 'KIC' in id.upper() else 'TESS'
-
+    # -------------------------------    
+    id, cadence, author, quarter, sector, mission = read_json_file(*args, **kwargs)
+    if author: kwargs['author'] = author 
+    if quarter: kwargs['quarter'] = quarter
+    if sector: kwargs['sector'] = sector
+    
+    # Case 2: JSON file + lightcurve file
+    lc_file = kwargs.get('lc_file')
+    if lc_file is not None:
+        # Assumes csv data file with columns time (days), flux (ppm) and flux_err (ppm)
+        data        = np.genfromtxt(lc_file, delimiter=',', names=['time', 'flux', 'flux_err'])
+        mask        = ~np.isnan(data['time']) & ~np.isnan(data['flux']) & ~np.isnan(data['flux_err'])
+        data        = data[mask]
+        time        = np.array(data['time'])
+        flux        = np.array(data['flux'])
+        flux_err    = np.array(data['flux_err'])
+        lc = lk.LightCurve(time=time, flux=flux, flux_err=flux_err)
+        return lc, id, cadence
+    
+    # Case 3: JSON file only
+    elif lc_file is None:
         kwargs = dict(target=id, mission=mission, cadence=cadence)
-        if author: kwargs['author'] = author 
-        if quarter: kwargs['quarter'] = quarter
-        if sector: kwargs['sector'] = sector
-
         search_results = lk.search_lightcurve(**kwargs)
         if len(search_results) == 0:
             raise ValueError(f"No light curves found for {id} ({mission}).")
@@ -66,42 +68,8 @@ def get_lightcurve(*args, **kwargs):
                                 flux_err=lc.flux_err.value)
             lc_list.append(lc)
         lc = lc.append(lc_list)
-        
-        return lc, id
-    # -------------------------------
-    # Case 2: ID string (+ optional cadence)
-    str_args = [a for a in args if isinstance(a, str)]
-    if len(str_args) > 0:
-        id = str_args[0]
-        print(str_args)
-        print(len(str_args))
-        cadence = str_args[1] if len(str_args) > 0 else 'long'
-        mission = 'Kepler' if 'KIC' in id.upper() else 'TESS'
-
-        search_results = lk.search_lightcurve(target=id, mission=mission, cadence=cadence)
-        if len(search_results) == 0:
-            raise ValueError(f"No light curves found for {id} ({mission}).")
-
-        author = find_author(search_results=search_results)
-
-        search_results = lk.search_lightcurve(target=id, 
-                                              mission=mission, 
-                                              cadence=cadence, 
-                                              author=author,
-                                              quarter=np.arange(10,15)
-                                              )
-        return search_results.download_all().stitch(), id
-
-    # -------------------------------
-    # Case 3: Arrays (time, flux, optional flux_err)
-    array_args = [np.array(a) for a in args if isinstance(a, (list, np.ndarray))]
-    if len(array_args) >= 2:
-        time = array_args[0]
-        flux = array_args[1]
-        flux_err = array_args[2] if len(array_args) > 2 else None
-        return lk.LightCurve(time=time, flux=flux, flux_err=flux_err)
-
-    # -------------------------------
+        return lc, id, cadence
+    
     raise ValueError("Invalid arguments. Provide either an ID string or time+flux arrays.")
 
 def prepare_lightcurve(lc=None, id=None, *args, **kwargs):
@@ -260,11 +228,27 @@ def get_savgol_filter(lc):
             filter  : savgol filter
     '''
     from scipy.signal import savgol_filter
+    start = t.time() 
     pg = lc.to_periodogram()
     pmax = pg.period_at_max_power.value
+    end = t.time()
+    print(f"computation time for pmax: {end - start:.4f} seconds")
     wl = int(pmax/np.mean(np.diff(lc.time.value)) / 2)
     wl = wl if wl % 2 != 0 else wl + 1
+    
+    chunk_len = max(lc.time.value) / 20
+    def chunk_up_array(array, time, chunk_len):
+        chunk_size = int(chunk_len / np.mean(np.diff(time)))
+        n_chunk = len(lc.time.value) // chunk_size
+        return array[:chunk_size*n_chunk].reshape((n_chunk, chunk_size))
+    
+    start = t.time() 
+    # filter = np.array([savgol_filter(flux, window_length=wl, polyorder=2) for flux in chunk_up_array(lc.flux.value, lc.time.value, chunk_len)]).flatten()
     filter = savgol_filter(lc.flux.value, window_length=wl, polyorder=2)
+    end = t.time()
+    print(f"computation time for savgol: {end - start:.4f} seconds")
+
+    # print(filter, len(filter), len(lc.time.value))
     return filter
 
 def plot_lc(time=None, original_flux=None, filters=None, smoothed_fluxes=None, id=None):
@@ -311,3 +295,19 @@ def plot_lc(time=None, original_flux=None, filters=None, smoothed_fluxes=None, i
 
     fig.savefig(f'{savepath}/lightcurve.png', dpi=300, bbox_inches='tight')
     plt.close(fig)
+
+def read_json_file(*args, **kwargs):
+    '''
+        Reads JSON file if provided.
+    '''
+    json_args = [a for a in args if isinstance(a, str) and a.endswith('.json')]
+    if len(json_args) > 0:
+        with open(json_args[0], 'r') as f:
+            cfg = json.load(f)
+        id = cfg.get('target')
+        cadence = cfg.get('cadence', 'long')
+        author = cfg.get('author', None)
+        quarter = cfg.get('quarter', None)
+        sector = cfg.get('sector', None)
+        mission = 'Kepler' if 'KIC' in id.upper() else 'TESS'
+    return id, cadence, author, quarter, sector, mission

@@ -1,18 +1,18 @@
-from .data_preparation import get_lightcurve, prepare_lightcurve, calculate_psd
+from .data_preparation import get_lightcurve, prepare_lightcurve, calculate_psd, mean_psd
 from .proxies.numax_from_ACF import NumaxFromACF
 
 class NumaxProxies:
     #This happens when you create (initialize) the class i.e. class = FreqProxy(args,kwargs) somewhere
     def __init__(self, *args, **kwargs):
         # Fetch light curve (from ID or arrays)
-        self._lc, self._id = get_lightcurve(*args, **kwargs)
+        self._lc, self._id, self._cadence = get_lightcurve(*args, **kwargs)
 
         # Preprocess and compute periodogram
         self._savgol_iters = kwargs.pop("savgol_iters", 0)
         self._lc = prepare_lightcurve(self._lc, self._id, 
                                       plot=True, savgol=True,
                                       savgol_iters=self._savgol_iters)
-        self._pg = calculate_psd(self._lc)
+        self._pg = mean_psd(lc=self._lc, cadence=self._cadence)
 
         # Frequency proxies container
         self._freqs = {}

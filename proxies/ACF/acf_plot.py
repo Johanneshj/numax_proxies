@@ -1,9 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
+import time as t
 
 def plot_spec(frequency, power, smoothed_power, ax, id):
-    ax.loglog(frequency, power, c='gray', label='original spectrum')
+    ax.loglog(frequency, power, c='gray', label='mean spectrum')
     ax.loglog(frequency, smoothed_power, c='k', label='median filter')
     ax.set_xlabel('frequency [μHz]')
     ax.set_ylabel('power spectral density')
@@ -14,9 +15,12 @@ def plot_spec(frequency, power, smoothed_power, ax, id):
 def plot_2D_ACF(ACF, frequency, ax):
     if np.max(frequency) > 300:
         window_size_muHz = 249
+        step = 10
     else:
+        step = 2
         window_size_muHz = 49
-    ax.imshow(ACF.T,
+    start = t.time() 
+    ax.imshow(ACF[::step, ::step].T,
                 cmap='Greys_r',
                 aspect='auto',
                 norm=LogNorm(vmin=0.001, vmax=1),
@@ -26,6 +30,8 @@ def plot_2D_ACF(ACF, frequency, ax):
                 )
     ax.set_xlabel("frequency [μHz]")
     ax.set_ylabel("spacing [μHz]")
+    end = t.time()
+    print(f"computation time for plotting ACF: {end - start:.4f} seconds")
     #plt.colorbar(label='|ACF| (log scale)', cax=ax)
 
 def plot_collapsed_acf_with_gaussian_fit(collapsed_2D_acf, freq_centers, fit_vals, ax):
