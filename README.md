@@ -53,7 +53,7 @@ proxy = NumaxProxies("stars/KIC1435467.json", lc_file='path_to_lightcurve.csv'
 - **Flexible input options** — works with:
   - a simple **target ID** (`KICXXXXXX` or `TICXXXXXXX`),
   - a detailed **JSON configuration file**,
-  - direct **time and flux csv files**, or
+  - direct **time and flux csv file**, or
   - a **default example star** if no input is given.
 - **Automatic source prioritization** - selects data based on coverage and author (e.g., KASOC, Kepler, TASOC, SPOC, etc.).
 - **LightKurve backend** — leverages [Lightkurve](https://docs.lightkurve.org/) for searching and downloading mission data.
