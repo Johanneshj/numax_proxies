@@ -74,6 +74,7 @@ proxy.compute_acf()
   - **ACF calculation becomes demanding for long time-series** - clever workaround?
     - Implemented mean PSD; ACF calculation now takes < 1 sec for 4 year Kepler SC light curve.
   - **Handle if Gaussian fit can't be done** - sometimes fail at fitting Gaussian...
+  - **Prior estimates for Gaussian fit** - right now prior is set by frequency at maximum of collapsed 2D ACF, maybe can also use scaling relations as prior estimate?
 - **General:**
     - Savgol filtering is nice, but currently takes ~20 seconds each iteration...
     - make data prep more clean.
