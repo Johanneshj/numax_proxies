@@ -79,6 +79,9 @@ proxy.compute_numax_from_scaling_relations()
 
 ---
 ## 📈 Example Results
+Example of full spectrum with all numax estimates
+![Full spectrum](results/KIC12008916/figures/full_spectrum_with_all_estimates.png)
 Example of ACF method
 ![Example of ACF method](results/KIC12008916/figures/ACF.png)
+Example of Coefficients of Variation method
 ![Example of CoV method](results/KIC12008916/figures/CoVs.png)

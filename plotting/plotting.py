@@ -2,8 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from uncertainties import ufloat, UFloat
 from uncertainties import unumpy as unp
+import os
 
-def plot_spectrum_with_all_numax_estimates(frequency, power, numax_dict):
+def plot_spectrum_with_all_numax_estimates(frequency, power, numax_dict, id):
     fig, ax = plt.subplots()
     ax.loglog(frequency, power, 
             c='gray')
@@ -35,4 +36,8 @@ def plot_spectrum_with_all_numax_estimates(frequency, power, numax_dict):
                        color=c)
     ax.set_xlabel('Frequency')
     ax.set_ylabel('Power')
+    ax.text(0.02, 0.02, f'{id}', ha='left', va='bottom', transform=ax.transAxes)
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    savepath = os.path.join('numax_proxies', 'results', id, 'figures')
+    os.makedirs(savepath, exist_ok=True)
+    fig.savefig(f'{savepath}/full_spectrum_with_all_estimates.png', dpi=300, bbox_inches='tight')

@@ -73,7 +73,8 @@ class NumaxProxies:
         plot_spectrum_with_all_numax_estimates(
             self._pg.frequency,
             self._pg.power,
-            self._numax_estimates
+            self._numax_estimates,
+            self._id
         )
         return
 
