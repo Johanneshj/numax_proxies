@@ -6,6 +6,7 @@ from . import (
     numax_estimate_CoV
 )
 import os
+from uncertainties import ufloat
 
 class CoefficientsOfVariation:
     def __init__(self, lc=None, pg=None, id=None, *args, **kwargs):
@@ -18,7 +19,7 @@ class CoefficientsOfVariation:
 
         self._bin_centers = None
         self._CoVs = None
-        self._smoothed_CoVs = None
+        self._smoothed_CoVs = None 
         self._numax = None
         self._numax_error = None
 
@@ -35,6 +36,8 @@ class CoefficientsOfVariation:
             self._bin_centers,
             self._smoothed_CoVs
         )
+        self._numax = ufloat(self._numax, self._numax_error)
+        return self._numax
     
     def plot(self, *args, **kwargs):
         import matplotlib.pyplot as plt
@@ -43,7 +46,6 @@ class CoefficientsOfVariation:
                                 self._CoVs,
                                 self._smoothed_CoVs,
                                 self._numax,
-                                self._numax_error,
                                 ax=ax,
                                 id=self._id)
         savepath = os.path.join('numax_proxies', 'results', self._id, 'figures')

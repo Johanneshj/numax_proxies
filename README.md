@@ -58,18 +58,20 @@ proxy.compute_acf()
 ```python
 # For example
 proxy = NumaxProxies("KIC12008916.json", savgol_iters=2)
-proxy.compute_acf()
+proxy.compute_numax_from_acf()
+proxy.compute_numax_from_CoV()
+proxy.compute_numax_from_scaling_relations()
 ```
 
 ---
 ## ⚠️ To-do
-- **Implement more $\nu_\text{max}$ proxies** - coeffs of var, scaling relations, ...
+- **Implement more $\nu_\text{max}$ proxies**: Currently have 2D ACF, Coefficients of variation, and scaling relations.
 - **ACF** - improvements:
   - Huber+ 2009 bins spectrum in evenly spaced log bins, Viana+ 2019 simply smooths with a window size of 10 and 100 muHz for long and short cadence data respectively. **What's the best approach?**
   - **Plotting 2D ACF map is computationally heavy** - can it be faster?
     - *Example - 4-year Kepler SC lightcurve:* ACF computation takes 1 minute, with plotting ~5 minutes.
   - **ACF calculation becomes demanding for long time-series** - clever workaround?
-  - **Implement average PSD**.
+  - **Implement average PSD**: Implemented!
   - **Handle if Gaussian fit can't be done** - sometimes fail at fitting Gaussian...
 - **General:**
     - make data prep more clean.

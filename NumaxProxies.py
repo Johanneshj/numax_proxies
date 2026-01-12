@@ -1,4 +1,5 @@
 from .data_preparation import get_lightcurve, prepare_lightcurve, calculate_psd, mean_psd, read_logg_and_teff
+from .plotting import plot_spectrum_with_all_numax_estimates
 from .proxies.numax_from_ACF import NumaxFromACF
 from .proxies.numax_from_scaling_relations import NumaxFromScalingRelations
 from .proxies.numax_from_coefficients_of_variation import CoefficientsOfVariation
@@ -28,7 +29,7 @@ class NumaxProxies:
             self._pg = self._full_pg
 
         # Frequency proxies container
-        self._freqs = {}
+        self._numax_estimates = {}
 
     def compute_numax_from_acf(self, plot=True):
         """
@@ -37,13 +38,10 @@ class NumaxProxies:
         acf_proxy = NumaxFromACF(lc=self._lc, pg=self._pg, id=self._id)
         numax = acf_proxy.compute()
 
-        self._freqs["numax_ACF"] = numax
-
         if plot:
             acf_proxy.plot(noise_std=self._noise_std)
 
-
-        return numax
+        self._numax_estimates["numax_2DACF"] = numax
 
     def compute_numax_from_scaling_relations(self):
         """
@@ -51,9 +49,7 @@ class NumaxProxies:
         """
         scaling_relations_proxy = NumaxFromScalingRelations(id=self._id)#, self._logg, self._teff)
         numaxes = scaling_relations_proxy.compute()
-        
-        # print(numaxes)
-        return numaxes
+        self._numax_estimates.update(numaxes)
     
     def compute_numax_from_CoV(self, plot=True):
         """
@@ -63,15 +59,22 @@ class NumaxProxies:
         :param plot: Description
         """
         CoV_proxy = CoefficientsOfVariation(lc=self._lc, pg=self._pg, id=self._id)
-        CoV_proxy.compute()
+        numax = CoV_proxy.compute()
         
         if plot:
             CoV_proxy.plot()
+        
+        self._numax_estimates['numax_CoV'] = numax
 
     def plotting(self):
         '''
             Here we are going to plot the full spectrum with all numax estimates
         '''
+        plot_spectrum_with_all_numax_estimates(
+            self._pg.frequency,
+            self._pg.power,
+            self._numax_estimates
+        )
         return
 
 

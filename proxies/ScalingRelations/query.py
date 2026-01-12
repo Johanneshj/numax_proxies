@@ -37,47 +37,35 @@ def get_query(id):
                 """
     
     QUERY = f"""
-        SELECT
-            dr3.source_id,
-                dr3.radius_gspphot,
-                dr3.radius_gspphot_lower,
-                dr3.radius_gspphot_upper,
-                dr3.teff_gspspec,
-                dr3.teff_gspspec_lower,
-                dr3.teff_gspspec_upper,
-                dr3.teff_gspphot,
-                dr3.teff_gspphot_lower,
-                dr3.teff_gspphot_upper,
-                dr3.logg_gspspec,
-                dr3.logg_gspspec_lower,
-                dr3.logg_gspspec_upper,
-                dr3.logg_gspphot,
-                dr3.logg_gspphot_lower,
-                dr3.logg_gspphot_upper,
-                dr3.lum_flame,
-                dr3.lum_flame_lower,
-                dr3.lum_flame_upper,
-                dr3.mass_flame,
-                dr3.mass_flame_lower,
-                dr3.mass_flame_upper,
-                dr3.radius_flame,
-                dr3.radius_flame_lower,
-                dr3.radius_flame_upper,
-                dr3.teff_esphs,
-                dr3.teff_esphs_uncertainty,
-                dr3.logg_esphs,
-                dr3.logg_esphs_uncertainty,
-                dr3.teff_espucd,
-                dr3.teff_espucd_uncertainty,
-                dr3.logg_msc1,
-                dr3.logg_msc1_lower,
-                dr3.logg_msc1_upper,
-                dr3.logg_msc2,
-                dr3.logg_msc2_lower,
-                dr3.logg_msc2_upper
-        FROM gaiadr3.astrophysical_parameters AS dr3
-        {dr2_string if data_release == 'DR2' else f'WHERE dr3.source_id = {gaia_id}'}
-        """
+            SELECT
+                dr3.source_id,
+                    dr3.radius_gspphot,
+                    dr3.radius_gspphot_lower,
+                    dr3.radius_gspphot_upper,
+                    dr3.teff_gspspec,
+                    dr3.teff_gspspec_lower,
+                    dr3.teff_gspspec_upper,
+                    dr3.teff_gspphot,
+                    dr3.teff_gspphot_lower,
+                    dr3.teff_gspphot_upper,
+                    dr3.logg_gspspec,
+                    dr3.logg_gspspec_lower,
+                    dr3.logg_gspspec_upper,
+                    dr3.logg_gspphot,
+                    dr3.logg_gspphot_lower,
+                    dr3.logg_gspphot_upper,
+                    dr3.lum_flame,
+                    dr3.lum_flame_lower,
+                    dr3.lum_flame_upper,
+                    dr3.mass_flame,
+                    dr3.mass_flame_lower,
+                    dr3.mass_flame_upper,
+                    dr3.radius_flame,
+                    dr3.radius_flame_lower,
+                    dr3.radius_flame_upper
+            FROM gaiadr3.astrophysical_parameters AS dr3
+            {dr2_string if data_release == 'DR2' else f'WHERE dr3.source_id = {gaia_id}'}
+            """
     return QUERY
 
 def return_dict(job=None):
@@ -116,4 +104,96 @@ def return_dict(job=None):
     return dictionary
 
 
-    
+## Different queries
+# QUERY = f"""
+#         SELECT
+#             dr3.source_id,
+#                 dr3.radius_gspphot,
+#                 dr3.radius_gspphot_lower,
+#                 dr3.radius_gspphot_upper,
+#                 dr3.teff_gspspec,
+#                 dr3.teff_gspspec_lower,
+#                 dr3.teff_gspspec_upper,
+#                 dr3.teff_gspphot,
+#                 dr3.teff_gspphot_lower,
+#                 dr3.teff_gspphot_upper,
+#                 dr3.logg_gspspec,
+#                 dr3.logg_gspspec_lower,
+#                 dr3.logg_gspspec_upper,
+#                 dr3.logg_gspphot,
+#                 dr3.logg_gspphot_lower,
+#                 dr3.logg_gspphot_upper,
+#                 dr3.lum_flame,
+#                 dr3.lum_flame_lower,
+#                 dr3.lum_flame_upper,
+#                 dr3.mass_flame,
+#                 dr3.mass_flame_lower,
+#                 dr3.mass_flame_upper,
+#                 dr3.radius_flame,
+#                 dr3.radius_flame_lower,
+#                 dr3.radius_flame_upper,
+#                 dr3.teff_esphs,
+#                 dr3.teff_esphs_uncertainty,
+#                 dr3.logg_esphs,
+#                 dr3.logg_esphs_uncertainty,
+#                 dr3.teff_espucd,
+#                 dr3.teff_espucd_uncertainty,
+#                 dr3.logg_msc1,
+#                 dr3.logg_msc1_lower,
+#                 dr3.logg_msc1_upper,
+#                 dr3.logg_msc2,
+#                 dr3.logg_msc2_lower,
+#                 dr3.logg_msc2_upper
+#         FROM gaiadr3.astrophysical_parameters AS dr3
+#         {dr2_string if data_release == 'DR2' else f'WHERE dr3.source_id = {gaia_id}'}
+#         """
+
+# QUERY = f"""
+#         SELECT
+#             dr3.source_id,
+#                 dr3.radius_gspphot,
+#                 dr3.radius_gspphot_lower,
+#                 dr3.radius_gspphot_upper,
+#                 dr3.teff_gspspec,
+#                 dr3.teff_gspspec_lower,
+#                 dr3.teff_gspspec_upper,
+#                 dr3.teff_gspphot,
+#                 dr3.teff_gspphot_lower,
+#                 dr3.teff_gspphot_upper,
+#                 dr3.logg_gspspec,
+#                 dr3.logg_gspspec_lower,
+#                 dr3.logg_gspspec_upper,
+#                 dr3.logg_gspphot,
+#                 dr3.logg_gspphot_lower,
+#                 dr3.logg_gspphot_upper,
+#                 dr3.lum_flame,
+#                 dr3.lum_flame_lower,
+#                 dr3.lum_flame_upper,
+#                 dr3.mass_flame,
+#                 dr3.mass_flame_lower,
+#                 dr3.mass_flame_upper,
+#                 dr3.radius_flame,
+#                 dr3.radius_flame_lower,
+#                 dr3.radius_flame_upper
+#         FROM gaiadr3.astrophysical_parameters AS dr3
+#         {dr2_string if data_release == 'DR2' else f'WHERE dr3.source_id = {gaia_id}'}
+#         """
+
+# QUERY = f"""
+#         SELECT
+#             dr3.source_id,
+#                 dr3.teff_gspspec,
+#                 dr3.teff_gspspec_lower,
+#                 dr3.teff_gspspec_upper,
+#                 dr3.teff_gspphot,
+#                 dr3.teff_gspphot_lower,
+#                 dr3.teff_gspphot_upper,
+#                 dr3.logg_gspspec,
+#                 dr3.logg_gspspec_lower,
+#                 dr3.logg_gspspec_upper,
+#                 dr3.logg_gspphot,
+#                 dr3.logg_gspphot_lower,
+#                 dr3.logg_gspphot_upper
+#         FROM gaiadr3.astrophysical_parameters AS dr3
+#         {dr2_string if data_release == 'DR2' else f'WHERE dr3.source_id = {gaia_id}'}
+#         """

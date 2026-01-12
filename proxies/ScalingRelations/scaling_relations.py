@@ -18,7 +18,7 @@ def compute_numaxes(*args, **kwargs):
                                         kwargs.get(f'{param}_err', 0)))
         else:
             continue
-            
+    
     loggs = make_broadcastable_uarray('logg', numax_dict)
     teffs = make_broadcastable_uarray('teff', numax_dict)
     lums = make_broadcastable_uarray('lum', numax_dict)
@@ -57,6 +57,7 @@ def numax_scaling_relations(logg=None, teff=None, lum=None, mass=None, radius=No
     list of float or np.ndarray
         [numax_1, numax_2, numax_3] scaling relation values in microHz
     """
+    numaxes = {}
 
     # Solar reference values
     logg_Sun = 4.44   # dex
@@ -64,22 +65,30 @@ def numax_scaling_relations(logg=None, teff=None, lum=None, mass=None, radius=No
     numax_Sun = 3090.0  # microHz
 
     # logg–Teff relation
-    numax_1 = numax_Sun * (10 ** (logg - logg_Sun)) / unp.sqrt(teff / teff_Sun).T
+    numax_1 = numax_Sun * (10 ** (logg - logg_Sun)) / unp.sqrt(teff / teff_Sun)
+    for i, val in enumerate(numax_1):
+        numaxes[f'numax_SR_logg_teff_{i}'] = val[0]
 
     # Mass–Radius–Teff relation
     numax_2 = numax_Sun * radius ** (-2) * mass.T / unp.sqrt(teff / teff_Sun)
+    for i, val in enumerate(numax_2):
+        numaxes[f'numax_SR_mass_radius_teff_{i}'] = val[0]
 
     # Mass–Luminosity–Teff relation
     mass_div_lum = mass / lum.T
     numax_3 = numax_Sun * mass_div_lum.ravel() * (teff / teff_Sun) ** 3.5
+    for i, val in enumerate(numax_3):
+        numaxes[f'numax_SR_mass_luminosity_teff_{i}'] = val[0]
 
-    numaxes = np.concatenate((numax_1.ravel(), 
-                              numax_2.ravel(), 
-                              numax_3.ravel()
-                              ))
+    # numaxes = np.concatenate((numax_1.ravel(), 
+    #                           numax_2.ravel(), 
+    #                           numax_3.ravel()
+    #                           ))
     
-    numaxes = numaxes.ravel()
 
+
+    # numaxes = numaxes.ravel()
+    print(numaxes)
     return numaxes
 
 def make_broadcastable_uarray(param, dictionary):
