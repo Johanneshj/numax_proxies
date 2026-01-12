@@ -78,5 +78,5 @@ proxy.compute_acf()
 ---
 ## 📈 Example Results
 Example of ACF method
-![Example of ACF method](results/KIC1435467/figures/ACF.png)
-![Example of CoV method](results/KIC1435467/figures/CoVs.png)
+![Example of ACF method](results/KIC12008916/figures/ACF.png)
+![Example of CoV method](results/KIC12008916/figures/CoVs.png)
