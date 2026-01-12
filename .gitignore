@@ -4,3 +4,8 @@ tool.ipynb
 test.ipynb
 build/
 dist/
+test_jannsen*
+test.py
+stars/*
+results/*ppm
+.python-version

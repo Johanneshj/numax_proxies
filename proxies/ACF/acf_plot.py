@@ -37,7 +37,7 @@ def plot_2D_ACF(ACF, frequency, ax):
 def plot_collapsed_acf_with_gaussian_fit(collapsed_2D_acf, freq_centers, fit_vals, ax):
     def gaussian(x, A, sigma, mu):
         return A * np.exp(-(x - mu)**2 / (2 * sigma**2))
-    x = np.linspace(min(freq_centers), max(freq_centers), 100)
+    x = np.linspace(min(freq_centers), max(freq_centers), 1000)
     ax.plot(freq_centers, collapsed_2D_acf, c='k', marker='.', label='collapsed 2D ACF')
     ax.plot(x, gaussian(x, *fit_vals), c='r', label='Gaussian fit')
     ax.axvline(fit_vals[2], c='gray', ls='--', label=f'numax = {np.round(fit_vals[2],2)}')

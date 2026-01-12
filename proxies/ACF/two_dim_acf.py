@@ -2,6 +2,7 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.optimize import curve_fit
 from .corr_acf_and_fft_acf import batch_fft_acf, abs_acf
+import time as t
 
 def calculate_two_dim_ACF(frequency=None, power=None, plot=False):
 
@@ -21,7 +22,7 @@ def calculate_two_dim_ACF(frequency=None, power=None, plot=False):
             freq_windows :: binned frequency list
                 -> needed for plotting and collapsed ACF.
     '''
-
+    start = t.time()
     df = np.mean(np.diff(frequency))
 
     if np.max(frequency) > 300:
@@ -36,10 +37,13 @@ def calculate_two_dim_ACF(frequency=None, power=None, plot=False):
     freq_windows = sliding_window_view(frequency, window_shape=window_size)[::step]
     power_windows = sliding_window_view(power, window_shape=window_size)[::step].copy()
     
-    if np.max(frequency) > 300:
+    if np.max(frequency) > 500:
         acf = batch_fft_acf(power_windows)
     else:
         acf = np.array([abs_acf(seg) for seg in power_windows]) #
-        
+        print('lol')
+    end = t.time()
+    print(f"2DACF computation time with averaged psd: {end - start:.4f} seconds")
+
     return acf, freq_windows 
     

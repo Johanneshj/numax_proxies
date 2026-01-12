@@ -40,7 +40,7 @@ class NumaxFromACF:
         )
         return self._numax
     
-    def plot(self, *args, **kwargs):
+    def plot(self, noise_std, *args, **kwargs):
         import matplotlib.pyplot as plt
         fig, axs = plt.subplots(3, 1, figsize=(6,12))
         plot_spec(self._pg.frequency.value, 
@@ -57,4 +57,5 @@ class NumaxFromACF:
                                              ax=axs[2])
         savepath = os.path.join('numax_proxies', 'results', self._id, 'figures')
         os.makedirs(savepath, exist_ok=True)
+        if noise_std > 0: fig.savefig(f'{savepath}/ACF_noise-{noise_std}ppm.png', dpi=300, bbox_inches='tight')
         fig.savefig(f'{savepath}/ACF.png', dpi=300, bbox_inches='tight')

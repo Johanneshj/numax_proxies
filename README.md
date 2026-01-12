@@ -43,9 +43,6 @@ with open("KIC12008916.json", "w") as f:
 ```python
 proxy = NumaxProxies("KIC12008916.json")
 proxy.compute_acf()
-
-### or if light curve csv-file is provided
-proxy = NumaxProxies("stars/KIC1435467.json", lc_file='path_to_lightcurve.csv'
 ```
 
 --- 
@@ -53,7 +50,7 @@ proxy = NumaxProxies("stars/KIC1435467.json", lc_file='path_to_lightcurve.csv'
 - **Flexible input options** — works with:
   - a simple **target ID** (`KICXXXXXX` or `TICXXXXXXX`),
   - a detailed **JSON configuration file**,
-  - direct **time and flux csv file**, or
+  - direct **time and flux arrays**, or
   - a **default example star** if no input is given.
 - **Automatic source prioritization** - selects data based on coverage and author (e.g., KASOC, Kepler, TASOC, SPOC, etc.).
 - **LightKurve backend** — leverages [Lightkurve](https://docs.lightkurve.org/) for searching and downloading mission data.
@@ -70,13 +67,11 @@ proxy.compute_acf()
 - **ACF** - improvements:
   - Huber+ 2009 bins spectrum in evenly spaced log bins, Viana+ 2019 simply smooths with a window size of 10 and 100 muHz for long and short cadence data respectively. **What's the best approach?**
   - **Plotting 2D ACF map is computationally heavy** - can it be faster?
-    - *Example - 4-year Kepler SC lightcurve:* With mean psd takes and undersampling takes ~0.005 seconds.
+    - *Example - 4-year Kepler SC lightcurve:* ACF computation takes 1 minute, with plotting ~5 minutes.
   - **ACF calculation becomes demanding for long time-series** - clever workaround?
-    - Implemented mean PSD; ACF calculation now takes < 1 sec for 4 year Kepler SC light curve.
+  - **Implement average PSD**.
   - **Handle if Gaussian fit can't be done** - sometimes fail at fitting Gaussian...
-  - **Prior estimates for Gaussian fit** - right now prior is set by frequency at maximum of collapsed 2D ACF, maybe can also use scaling relations as prior estimate?
 - **General:**
-    - Savgol filtering is nice, but currently takes ~20 seconds each iteration...
     - make data prep more clean.
     - plot PSD with all numax estimates as vertical lines (with uncertainties?).
 
@@ -84,3 +79,4 @@ proxy.compute_acf()
 ## 📈 Example Results
 Example of ACF method
 ![Example of ACF method](results/KIC1435467/figures/ACF.png)
+![Example of CoV method](results/KIC1435467/figures/CoVs.png)

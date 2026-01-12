@@ -38,13 +38,7 @@ def mean_psd(lc=None, cadence=None) :
 
     dt = np.median(np.diff(time))
     print(dt, 0.5 * (30/(30*2*24)))
-    if cadence == 'short':
-      # for SC data (1min, 2min) we calculate averaged PSD
-      len_chunk = 90   
-    elif cadence == 'long':
-      print('lol')
-      # We dont need an averaged PSD for LC data
-      len_chunk = max(time)/2
+    len_chunk = 90
         
     size_chunk = int(len_chunk / dt)
     n_chunk = len(time) // size_chunk

@@ -3,7 +3,7 @@ import lightkurve as lk
 from collections import Counter
 import json
 import time as t
-
+from .add_noise import calculate_noise
 
 def get_lightcurve(*args, **kwargs):
     """
@@ -34,7 +34,7 @@ def get_lightcurve(*args, **kwargs):
     if sector: kwargs['sector'] = sector
     
     # Case 2: JSON file + lightcurve file
-    lc_file = kwargs.get('lc_file')
+    lc_file = kwargs.get('lc_file', None)
     if lc_file is not None:
         # Assumes csv data file with columns time (days), flux (ppm) and flux_err (ppm)
         data        = np.genfromtxt(lc_file, delimiter=',', names=['time', 'flux', 'flux_err'])
@@ -47,15 +47,23 @@ def get_lightcurve(*args, **kwargs):
         return lc, id, cadence
     
     # Case 3: JSON file only
-    elif lc_file is None:
+    elif lc_file is None:        
         kwargs = dict(target=id, mission=mission, cadence=cadence)
+
+        if not author:
+            kwargs['author'] = find_author(search_results)
+        else:
+            kwargs['author'] = author
+
+        if sector is not None:
+            kwargs['sector'] = sector
+        
+        if quarter is not None:
+            kwargs['quarter'] = quarter
+
         search_results = lk.search_lightcurve(**kwargs)
         if len(search_results) == 0:
             raise ValueError(f"No light curves found for {id} ({mission}).")
-        
-        if not author:
-            kwargs['author'] = find_author(search_results)
-            search_results = lk.search_lightcurve(**kwargs)
 
         lc_collection = search_results.download_all()
         lc_list = []
@@ -99,12 +107,14 @@ def prepare_lightcurve(lc=None, id=None, *args, **kwargs):
 
     time, original_flux, flux_err = sort_data_by_time(lc)
     time = close_gaps(time)
-    
+    original_flux += calculate_noise(original_flux, kwargs.get('noise_std', None)) if kwargs.get('add_noise', None) else 0 # Add noise for testing
+
     lc = lk.LightCurve(time=time, flux=original_flux, flux_err=flux_err)
 
     savgol = kwargs.get("savgol", False)
     plot = kwargs.get("plot", False)
     savgol_iters = kwargs.get("savgol_iters", 0)
+    dt = np.mean(np.diff(time)) * 24 * 60 * 60 # seconds
     if savgol:
         lc = lc
         filters = np.zeros((savgol_iters, len(lc.flux.value)))
@@ -124,13 +134,13 @@ def prepare_lightcurve(lc=None, id=None, *args, **kwargs):
             plot_lc(time=time, original_flux=original_flux, 
                     filters=filters, smoothed_fluxes=smoothed_fluxes, 
                     id=id)
-        return lc 
+        return lc, dt 
             
     else:
         if plot:
             plot_lc(time=lc.time.value, flux=lc.flux.value, 
                     id=id)
-        return lc
+        return lc, dt
 
 def calculate_psd(lc=None, *args, **kwargs):
     '''
@@ -311,3 +321,15 @@ def read_json_file(*args, **kwargs):
         sector = cfg.get('sector', None)
         mission = 'Kepler' if 'KIC' in id.upper() else 'TESS'
     return id, cadence, author, quarter, sector, mission
+
+def read_logg_and_teff(*args, **kwargs):
+    '''
+        Reads JSON file if provided.
+    '''
+    json_args = [a for a in args if isinstance(a, str) and a.endswith('.json')]
+    if len(json_args) > 0:
+        with open(json_args[0], 'r') as f:
+            cfg = json.load(f)
+        logg = cfg.get('logg', None)
+        teff = cfg.get('teff', None)
+    return logg, teff
