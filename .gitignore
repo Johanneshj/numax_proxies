@@ -1,0 +1,14 @@
+__pycache__/
+tool.ipynb
+*.egg-info/
+test.ipynb
+build/
+dist/
+test_jannsen*
+test.py
+stars/*
+results/*ppm
+.python-version
+results/_*
+_results/
+FliPer_model.pkl
