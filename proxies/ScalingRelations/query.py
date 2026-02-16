@@ -6,9 +6,10 @@ from pyvo.dal.exceptions import DALFormatError
 from requests.exceptions import ConnectionError
 import time as t
 
+
 def query_gaia(id=None, ra=None, dec=None):
 
-    gaia_id = query_simbad(object_name=id)#Simbad.query_objectids(object_name=id)
+    gaia_id = query_simbad(object_name=id)  # Simbad.query_objectids(object_name=id)
     if gaia_id is not None:
         QUERY = get_query(gaia_id)
         job = Gaia.launch_job(QUERY)
@@ -17,10 +18,12 @@ def query_gaia(id=None, ra=None, dec=None):
     else:
         return {}
 
+
 def get_query(id):
 
-    data_release = id.split(' ')[1]
-    gaia_id = id.split(' ')[2]
+    data_release = id.split(" ")[1]
+    gaia_id = id.split(" ")[2]
+    gaia_id = int(gaia_id)
 
     dr2_string = f"""
                 JOIN(
@@ -30,7 +33,7 @@ def get_query(id):
                     ) AS xmatch
                     ON xmatch.dr3_source_id = dr3.source_id
                 """
-    
+
     QUERY = f"""
             SELECT
                 dr3.source_id,
@@ -64,8 +67,8 @@ def get_query(id):
 
     return QUERY
 
+
 def return_dict(job=None):
-    from uncertainties import ufloat
 
     res = job.get_results()
     dictionary = {}
@@ -79,24 +82,37 @@ def return_dict(job=None):
         return res[0]
 
     for col in res.colnames:
-        if col.endswith('_lower') or col.endswith('_upper') or col.endswith('source_id') or col.endswith('_uncertainty'):
+        if (
+            col.endswith("_lower")
+            or col.endswith("_upper")
+            or col.endswith("source_id")
+            or col.endswith("_uncertainty")
+        ):
             continue
         lower_col = f"{col}_lower"
         upper_col = f"{col}_upper"
         uncertainty_col = f"{col}_uncertainty"
 
-        val = res[col] #if col is res.colnames else np.nan
+        val = res[col]  # if col is res.colnames else np.nan
         val_lower = res[lower_col] if lower_col in res.colnames else np.nan
         val_upper = res[upper_col] if upper_col in res.colnames else np.nan
-        val_uncertainty = res[uncertainty_col] if uncertainty_col in res.colnames else np.nan
+        val_uncertainty = (
+            res[uncertainty_col] if uncertainty_col in res.colnames else np.nan
+        )
 
         if np.isnan(val_uncertainty) and np.isfinite(val_lower) and np.isnan(val_upper):
             err = val - val_lower
-        elif np.isnan(val_uncertainty) and np.isfinite(val_upper) and np.isnan(val_lower):
+        elif (
+            np.isnan(val_uncertainty) and np.isfinite(val_upper) and np.isnan(val_lower)
+        ):
             err = val_upper - val
         elif np.isfinite(val_uncertainty):
             err = val_uncertainty
-        elif np.isnan(val_uncertainty) and np.isfinite(val_lower) and np.isfinite(val_upper):
+        elif (
+            np.isnan(val_uncertainty)
+            and np.isfinite(val_lower)
+            and np.isfinite(val_upper)
+        ):
             err = (val_upper - val_lower) / 2
         else:
             err = np.nan
@@ -108,27 +124,27 @@ def return_dict(job=None):
 
     return dictionary
 
+
 def query_simbad(object_name, retries=3, delay=1.5):
-    '''Query SIMBAD with retries to account for time-outs'''
+    """Query SIMBAD with retries to account for time-outs"""
     for attempt in range(retries):
         try:
             res = Simbad.query_objectids(object_name=object_name)
             if res is None or len(res) == 0:
-                return None # No results
+                return None  # No results
             Gaia_ids = [
-                res[i][0]
-                for i in range(len(res))
-                if 'gaia' in res[i][0].lower()
+                res[i][0] for i in range(len(res)) if "gaia" in res[i][0].lower()
             ]
-            if len(Gaia_ids) == 0: 
-                return None # No Gaia IDs
+            if len(Gaia_ids) == 0:
+                return None  # No Gaia IDs
             gaia_id = sorted(Gaia_ids)[-1]
             return gaia_id
-        except (DALFormatError, ConnectionError, OSError) as e:
+        except (DALFormatError, ConnectionError, OSError):
             if attempt < retries - 1:
                 t.sleep(delay)
             else:
-                return None # SIMBAD query time-out even after retries
+                return None  # SIMBAD query time-out even after retries
+
 
 # def get_gaia_id(object_name):
 #     '''Query object and get Gaia id'''
@@ -140,10 +156,10 @@ def query_simbad(object_name, retries=3, delay=1.5):
 #             """
 #     job = Gaia.launch_job(query)
 #     results = job.get_results()
-    
+
 #     if len(results) == 0:
 #         return None
-    
+
 #     return results["source_id"][0]
 
 # def ensure_val(param):
@@ -257,7 +273,7 @@ def query_simbad(object_name, retries=3, delay=1.5):
 #                     ) AS xmatch
 #                     ON xmatch.dr3_source_id = dr3.source_id
 #                 """
-    
+
 #     QUERY = f"""
 #             SELECT
 #                 dr3.source_id,

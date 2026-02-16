@@ -89,8 +89,10 @@ numax_estimates = proxy.numax_estimates
 - **Implement more $\nu_\text{max}$ proxies**: Currently have 2D ACF, Coefficients of variation, and scaling relations.
 - **ACF** - improvements:
   - The resolution of the 2D ACF can heavily influcence the outcome, what is the best approach?
+  - ACF does not perform well for low numax, can we do sub-zero frequency analysis?
 - **CoV** - improvements:
   - Spectra often show high CoVs in the low-frequency regimes where there's activity. Can we work around this?
+  - CoV fails near Nyquist limit, maybe we can do super-Nyquist analysis?
 - **FliPer** - FliPer has been retrained on Kepler and TESS stars, but can it be done better?
 
 ---

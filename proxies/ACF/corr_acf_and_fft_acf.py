@@ -1,16 +1,17 @@
 import numpy as np
 
-def batch_fft_acf(power_windows):
-    '''
-        Autocorrelation by means of FFT.
-        Suitable for SC data.
 
-        Input:
-            power_windows :: list of binned windows (sliding)
-        
-        Output:
-            abs(acf) :: absolute 2D autocorrelation function
-    '''
+def batch_fft_acf(power_windows):
+    """
+    Autocorrelation by means of FFT.
+    Suitable for SC data.
+
+    Input:
+        power_windows :: list of binned windows (sliding)
+
+    Output:
+        abs(acf) :: absolute 2D autocorrelation function
+    """
 
     _, n_points = power_windows.shape
     nfft = 1 << (2 * n_points - 1).bit_length()
@@ -22,7 +23,7 @@ def batch_fft_acf(power_windows):
     # print(f"FFT computation time: {end - start:.4f} seconds")
 
     # start = time.time()
-    psd = np.abs(fft)**2
+    psd = np.abs(fft) ** 2
     # end = time.time()
     # print(f"PSD computation time: {end - start:.4f} seconds")
 
@@ -43,19 +44,20 @@ def batch_fft_acf(power_windows):
 
     return abs(acf)
 
+
 def abs_acf(x):
-    '''
-        Autocorrelation by means of np.correlate(x,x).
-        Suitable for LC data.
-        Calculated on a row-by-row basis.
+    """
+    Autocorrelation by means of np.correlate(x,x).
+    Suitable for LC data.
+    Calculated on a row-by-row basis.
 
-        Input:
-            x :: PSD values
+    Input:
+        x :: PSD values
 
-        Output:
-            np.abs(corr / np.max(corr)) :: normalized absolute autocorrelation
-    '''
+    Output:
+        np.abs(corr / np.max(corr)) :: normalized absolute autocorrelation
+    """
     x = x - np.mean(x)
-    corr = np.correlate(x, x, mode='full')
-    corr = corr[corr.size // 2:] # grab only the positive lags
+    corr = np.correlate(x, x, mode="full")
+    corr = corr[corr.size // 2 :]  # grab only the positive lags
     return np.abs(corr / np.max(corr))
