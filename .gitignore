@@ -11,4 +11,5 @@ results/*ppm
 .python-version
 results/_*
 _results/
+results/*
 FliPer_model.pkl
