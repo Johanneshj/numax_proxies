@@ -3,6 +3,7 @@ from astropy.timeseries import LombScargle
 from scipy.integrate import simpson
 import matplotlib.pyplot as plt
 import os
+from scipy.signal import savgol_filter
 
 
 class DataProcessing:
@@ -19,6 +20,10 @@ class DataProcessing:
             self._flux = np.array(flux, dtype=float)
             self._flux_err = np.array(flux_err, dtype=float)
         self._time *= 86400.0  # Convert days to seconds for periodogram calculations
+
+        # savgol filter
+        self._sg_filter = None
+        self._ws = None
 
         # Normalize to ppm if specified - use if light curve is in flux or normalized flux
         if kwargs.get("normalize", False):
@@ -86,6 +91,22 @@ class DataProcessing:
         self.sort_data_by_time()
         self.close_gaps()
         return self
+    
+    def savgol_smooth(self, ws=90):
+        """Perfom savgol-golay filter smoothing"""
+        time = self._time / 86400
+        flux = self._flux
+        self._wl_days = ws
+        
+        # Define window length
+        dt = np.median(np.diff(time))
+        print(dt, dt/86400)
+        wl = int(self._wl_days / dt) 
+        if (wl % 2) == 0:
+            wl += 1
+        self._sg_filter = savgol_filter(flux, window_length=wl, polyorder=3)
+        self._flux /= self._sg_filter
+        return self
 
     # ----------------------------
     # Periodogram (routines adopted from Martin Nielsen at Porto summer school 2024)
@@ -117,7 +138,7 @@ class DataProcessing:
     # ----------------------------
     # Averaged PSD (Sylvain Breton)
     # ----------------------------
-    def averaged_psd(self):
+    def averaged_psd(self, chunk_len=90):
         """
         Author: Sylvain Breton
         email: sylvain.breton@inaf.it
@@ -151,7 +172,9 @@ class DataProcessing:
         flux_err = self._flux_err
 
         dt = np.median(np.diff(time))
-        len_chunk = 90
+        len_chunk = chunk_len
+        if len_chunk >= np.max(time) / 2:
+            raise ValueError('chunk length for averaged PSD too long. Should be atleast 1/2 length of time series.')
         size_chunk = int(len_chunk / dt)
         n_chunk = len(time) // size_chunk
 
@@ -300,10 +323,16 @@ class DataProcessing:
         axs[0].set_xlabel("time [days]")
         axs[0].set_ylabel("rel. amp. [ppm]")
         axs[0].set_xlim(np.min(time), np.max(time))
+        if self._sg_filter is not None:
+            axs[0].plot(time, (self._sg_filter-1)*1e6, c="r", lw=2, ls="-")
+            axs[0].text(0.02, 0.98, 
+                        f"window size for savgol: {self._wl_days} days", 
+                        ha="left", va="top", transform=axs[0].transAxes,
+                        color='red')
 
         axs[1].loglog(freq, power, c="k")
         axs[1].set_xlabel("frequency [muHz]")
-        axs[1].set_ylabel("PSD [1/muHz^2]")
+        axs[1].set_ylabel("PSD [ppm^2/muHz]")
         axs[1].set_xlim(np.min(freq), np.max(freq))
 
         savepath = os.path.join("numax_proxies", "results", self._id, "figures")

@@ -1,6 +1,8 @@
 import lightkurve as lk
 import glob
 import numpy as np
+import pyarrow.feather as feather
+
 
 
 class GetLightcurve:
@@ -45,8 +47,11 @@ class GetLightcurve:
         # Get light curve from .csv file
         elif lc_file is not None:
             self._lc_file = lc_file
-            self.lightcurve_from_file()
-
+            if self._lc_file.endswith(".csv"):
+                self.lightcurve_from_csv_file()
+            elif ((self._lc_file.endswith(".feather")) or (self._lc_file.endswith(".ftr"))):
+                self.lightcurve_from_feather_file()
+            
         # Get light curve from fits files
         elif fits_files_folder is not None:
             self._fits_files_folder = fits_files_folder
@@ -109,21 +114,47 @@ class GetLightcurve:
         else:
             raise FileNotFoundError(f"No fits files for target {self._id}")
 
-    def lightcurve_from_file(self):
+    def lightcurve_from_csv_file(self):
         """Load lc from .csv file"""
-        data = np.genfromtxt(
-            self._lc_file, delimiter=",", names=["time", "flux", "flux_err"]
-        )
+        try:
+            data = np.genfromtxt(
+                self._lc_file, delimiter=",", names=["time", "flux", "flux_err"]
+            )
+            mask = (
+                ~np.isnan(data["time"])
+                & ~np.isnan(data["flux"])
+                & ~np.isnan(data["flux_err"])
+            )
+            data = data[mask]
+            self._time = np.array(data["time"])
+            self._flux = np.array(data["flux"])
+            self._flux_err = np.array(data["flux_err"])
+        except:
+            data = np.genfromtxt(
+                self._lc_file, delimiter=",", names=["time", "flux"]
+            )
+            mask = (
+                ~np.isnan(data["time"])
+                & ~np.isnan(data["flux"])
+            )
+            data = data[mask]
+            self._time = np.array(data["time"])
+            self._flux = np.array(data["flux"])
+            self._flux_err = np.ones_like(self._flux) * 50
+        return self
+    
+    def lightcurve_from_feather_file(self):
+        """Load lc from .feather file"""
+        data = feather.read_feather(self._lc_file)
         mask = (
             ~np.isnan(data["time"])
             & ~np.isnan(data["flux"])
-            & ~np.isnan(data["flux_err"])
         )
         data = data[mask]
-        self._time = np.array(data["time"])
+        self._time = np.array(data["time"]) / 86400
         self._flux = np.array(data["flux"])
-        self._flux_err = np.array(data["flux_err"])
-        return self
+        self._flux_err = np.ones_like(self._flux) * np.nanstd(self._flux)
+        return mask
 
     def lightcurve_from_target_name(self):
         """Use LightKurve to grab lc from id"""
