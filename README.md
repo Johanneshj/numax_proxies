@@ -8,7 +8,7 @@
 ### Coefficient of Variation (CoV)
 In chunks of the power-spectral density (PSD) the CoV is the ratio of the standard devation to the mean. For power spectra of pure white noise, this ratio equals unity. Examining where in the PSD the CoV is greater than 1 can be used to estimate $\nu_\text{max}$.
 - From Bell+ (2019) the False-Alarm-Probability is adopted $\rightarrow$ this mitigates false detections.
-- From Viani+ (2019) the $\text{log}\_\nu_\text{max}$ is adopted $\rightarrow$ this expands the CoV method to the entire PSD.
+- From Viani+ (2019) the log_$\nu_\text{max}$ is adopted $\rightarrow$ this expands the CoV method to the entire PSD.
 
   - **2D ACF:**
     - Follows the methodology of Huber+ 2009 and Viani+ 2019.
