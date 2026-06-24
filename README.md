@@ -4,7 +4,12 @@
 
 ---
 ## Methods
-  - **Coeffecients of variation.**
+
+### Coefficient of Variation (CoV)
+In chunks of the power-spectral density (PSD) the CoV is the ratio of the standard devation to the mean. For power spectra of pure white noise, this ratio equals unity. Examining where in the PSD the CoV is greater than 1 can be used to estimate $\nu_\text{max}$.
+- From Bell+ (2019) the False-Alarm-Probability is adopted $\rightarrow$ this mitigates false detections.
+- From Viani+ (2019) the $\text{log}\_\nu_\text{max}$ is adopted $\rightarrow$ this expands the CoV method to the entire PSD.
+
   - **2D ACF:**
     - Follows the methodology of Huber+ 2009 and Viani+ 2019.
     - Computes 2D ACF from PSD $\rightarrow$ collapsed the ACF to 1D $\rightarrow$ fits Gaussian to estimate $\nu_\text{max}$.
@@ -25,19 +30,19 @@ pip install numax_proxies
 from numax_proxies import NumaxProxies
 ```
 ```python
-  # Initialize numax proxies
-  proxy = NumaxProxies.read_yaml('numax_proxies/stars/KIC1872517.yaml').run()
+# Initialize numax proxies
+proxy = NumaxProxies.read_yaml('numax_proxies/stars/KIC1872517.yaml').run()
 
-  # Compute estimates
-  proxy.compute_numax_from_acf()
-  proxy.compute_numax_from_CoV()
-  proxy.compute_numax_from_scaling_relations()
+# Compute estimates
+proxy.compute_numax_from_acf()
+proxy.compute_numax_from_CoV()
+proxy.compute_numax_from_scaling_relations()
 
-  # Plot all estimates
-  proxy.plotting()
+# Plot all estimates
+proxy.plotting()
 
-  # Get results
-  res = proxy.results
+# Get results
+res = proxy.results
 ```
 
 --- 
