@@ -10,12 +10,14 @@ from .numax_from_ACF import NumaxFromACF
 from .numax_from_coefficients_of_variation import NumaxFromCoefficientsOfVariation
 from .numax_from_FliPer import NumaxFromFliPer
 from .numax_from_scaling_relations import NumaxFromScalingRelations
+from .numax_from_EACF import NumaxFromEACF
 
 __all__ = [
     "NumaxFromACF",
     "NumaxFromCoefficientsOfVariation",
     "NumaxFromFliPer",
-    "NumaxFromScalingRelations"
+    "NumaxFromScalingRelations",
+    "NumaxFromEACF"
 ]
 
 # from .ACF import *

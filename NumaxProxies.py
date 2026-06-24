@@ -4,223 +4,102 @@ from uncertainties import unumpy as unp
 import lightkurve as lk
 from lightkurve.periodogram import Periodogram
 from astropy import units as u
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional, Literal
+from numpy.typing import NDArray
+import pandas as pd
+import yaml
+import pyarrow.feather as feather
+import time as t
 
 # Internal imports
 from .data_preparation import GetLightcurve, DataProcessing, read_json_file
+from .data_preparation.dataclasses import *
 from .plotting import plot_spectrum_with_all_numax_estimates
 from .proxies.ScalingRelations import query_gaia
 from .proxies import (
     NumaxFromACF,
     NumaxFromScalingRelations,
     NumaxFromCoefficientsOfVariation,
-    NumaxFromFliPer
+    NumaxFromFliPer,
+    NumaxFromEACF
 )
 
 class NumaxProxies:
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, global_config : GlobalConfig):
+        """Initialize NumaxProxies class: Read all information from yaml file"""
         # Frequency proxies container
-        self._numax_estimates = {}
+        self.numax_estimates = {}
+        # Read inputs
+        self.star: StarInfo = global_config.star
+        self.config: ProcessingConfig = global_config.config
+        self.lc_input: LightCurveInput = global_config.lightcurve
+        self.psd_input: PSDInput = global_config.psd
+        self.acf_config: ACFConfig = global_config.acf_config
+        self.cov_config: COVConfig = global_config.cov_config
+        self.eacf_config: EACFConfig = global_config.eacf_config
 
-        # Fetch from json file
-        # star = StarInfo(read_json_file(*args))
-        star            = read_json_file(*args)
-        self._id        = star["target"]
-        self._cadence   = star["cadence"]
-        self._author    = star["author"]
-        self._quarter   = star["quarter"]
-        self._sector    = star["sector"]
-        self._mission   = star["mission"]
-        self._logg      = star["logg"]
-        self._teff      = star["teff"]
-        self._mag       = star["mag"]
-
-        # Get the lightcurve: either from fits files, .csv file, arrays, or identifier.
-        lc_file             = kwargs.get("lc_file", None)
-        fits_files_folder   = kwargs.get("fits_files_folder", None)
-        time                = kwargs.get("time", None)    
-        flux                = kwargs.get("flux", None)  
-        flux_err            = kwargs.get("flux_er", None)       
-
-        gl = GetLightcurve(
-            target=self._id,
-            cadence=self._cadence,
-            sector=self._sector,
-            quarter=self._quarter,
-            mission=self._mission,
-            author=self._author,
-            fits_files_folder=fits_files_folder,
-            lc_file=lc_file,
-            time=time,
-            flux=flux,
-            flux_err=flux_err
-        )
-        self._time, self._flux, self._flux_err = gl.final_lc
-
-        # Do we want to experiment with noise?
-        self._noise_std = (
-            kwargs.get("noise_std", 0) if kwargs.get("add_noise", False) else 0
-        )
-
-        # Query GAIA for info
-        query_flag = kwargs.get("query_gaia", False)
-        if query_flag:
-            self._gaia_query_dict = query_gaia(id=self._id)
-            self._initial_numax_flag = kwargs.get("initial_numax", False)
-            self._initial_numax = None
-            if self._initial_numax_flag:
-                self.compute_numax_from_scaling_relations()
-        else:
-            self._gaia_query_dict = {}
-            self._initial_numax_flag = False
-            self._initial_numax = None
-
-        # Process the light curve: we normalize, sort by time, close gaps, and finally compute periodogram
-        dp = DataProcessing(
-            time=self._time, flux=self._flux, flux_err=self._flux_err, id=self._id
-        )
-        dp.sort_data_by_time()
-        savgol = kwargs.get(
-            "savgol", True
-        )
-        if savgol:
-            ws = kwargs.get("savgol_window_size_in_days", 90)
-            dp.savgol_smooth(ws=ws)
-        normalize = kwargs.get(
-            "normalize", True
-        )  # Sometimes we dont want to normalize, but default is true
-        if normalize:
-            dp.normalize_flux()  # Normalize to ppm
-        dp.sort_and_close_gaps()  # Sort by time and close gaps larger than 3 days
-        dp.microHz_periodogram()  # Compute PSD with frequencies in microHz
-        dp.super_Nyquist_spectrum()  # Compute super Nyquist spectrum
-
-        # Define values
-        self._time, self._flux, self._flux_err = dp.final_lc  # light curve
-        self._frequency, self._power = dp.final_psd  # psd
-        self._supNyq_freq, self._supNyq_power = dp.supNyq_psd
-        if kwargs.get("plot_lc", False):
-            dp.plot_lc_and_pg()
-
-        # Also define LightCurve object and Periodogram object
-        self._lc = lk.LightCurve(
-            time=self._time, flux=self._flux, flux_err=self._flux_err
-        )
-        self._pg = Periodogram(
-            frequency=self._frequency * u.uHz, power=self._power * (1 / u.uHz)
-        )
-
-        # Compute averaged psd (Sylvain Breton)
-        # We only use this in 2D ACF method, but maybe it's also useful in the future
-        avg_psd = kwargs.get("avg_psd", False)
-        if avg_psd:
-            # Define chunk length, defaults to 90 days
-            chunk_length = kwargs.get("avg_psd_chunk_len_days", 90)
-            # Compute averaged PSD
-            dp.averaged_psd(chunk_len=chunk_length)
-            # Create periodogram object
-            self._avgpsd_freq, self._avgpsd_power = dp.avg_psd
-            self._avg_pg = Periodogram(
-                frequency=self._avgpsd_freq * u.uHz,
-                power=self._avgpsd_power * (1 / u.Hz),
-            )
-        else:
-            self._avg_pg = self._pg
-
-        # ACF misc.
-        ## Sliding window flag
-        self._sliding_window_flag = kwargs.get("sliding_window_flag", 'log_numax')
-        ## Parameters for log_numax binning - standard values have be tested with trial-and-error
-        self._acf_params = {
-            "ACF_min_freq": kwargs.get("ACF_min_freq", None),
-            "min_num_points": kwargs.get('ACF_min_num_points', None),
-            "ACF_overlap_scale": kwargs.get("ACF_overlap_scale", None),
-            "ACF_width_factor": kwargs.get("ACF_width_factor", None),
-        }
-
-    def compute_numax_from_acf(self, plot=True):
+    def compute_numax_from_acf(self) -> float:
         """
         Compute νmax using the 2D autocorrelation proxy.
         """
-        # Check if we should use averaged psd or not
-        if self._avg_pg is not None:
-            acf_proxy = NumaxFromACF(
-                lc=self._lc, 
-                pg=self._avg_pg, 
-                full_pg=self._pg,
-                id=self._id,
-                initial_numax=self._initial_numax,
-                sliding_window_flag=self._sliding_window_flag,
-                acf_params=self._acf_params
-            )
-        else:
-            acf_proxy = NumaxFromACF(
-                lc=self._lc, 
-                pg=self._pg, 
-                id=self._id,
-                initial_numax=self._initial_numax,
-                sliding_window_flag=self._sliding_window_flag,
-                acf_params=self._acf_params
-            )
-        numax = acf_proxy.compute()
+        # import matplotlib.pyplot as plt
+        acf_proxy = NumaxFromACF(
+            avg_psd = self.avg_psd if self.config.do_avg_psd else self.psd, # sometimes we don't want to use averaged psd
+            acf_config = self.acf_config,
+            config = self.config,
+            id = self.star.target,
+        )
+        numax = acf_proxy.compute().numax_estimate
 
-        if plot:
-            acf_proxy.plot(noise_std=self._noise_std)
+        if self.acf_config.plot:
+            acf_proxy.plot()
 
-        self._numax_estimates["numax_2DACF"] = numax
+        if self.acf_config.save_info:
+            acf_proxy.save_to_txt()
+
+        self.numax_estimates["numax_2DACF"] = numax
 
     def compute_numax_from_scaling_relations(self):
         """
         Compute νmax using the scaling relations.
         """
-        
-        if self._initial_numax_flag:
-            # If we want initial guess for other methods
-            scaling_relations_proxy = NumaxFromScalingRelations(
-                id=self._id, 
-                gaia_query_dict=self._gaia_query_dict
-            )
-            # , self._logg, self._teff)
-            numaxes = scaling_relations_proxy.compute()
-            if len(numaxes) > 0:
-                values = list(numaxes.values())
-                self._initial_numax = np.mean(values)
-                if hasattr(self._initial_numax, "nominal_value"):
-                    self._initial_numax = self._initial_numax.nominal_value
-            else:
-                self._initial_numax = None
-            self._numax_estimates.update(numaxes)
-        else:
-            # If other methods should speak for themselves
-            scaling_relations_proxy = NumaxFromScalingRelations(
-                id=self._id, 
-                gaia_query_dict=self._gaia_query_dict
-            )
-            # , self._logg, self._teff)
-            numaxes = scaling_relations_proxy.compute()
-            self._numax_estimates.update(numaxes)
+        scaling_relations_proxy = NumaxFromScalingRelations(
+            star = self.star,
+            config = self.config,
+            gaia_data = self.gaia_data if self.gaia_data else None
+        )
+        numaxes = scaling_relations_proxy.compute().numax_estimates
+        self.numax_estimates.update(numaxes)
 
-    def compute_numax_from_CoV(self, plot=True):
+    def compute_numax_from_CoV(self):
         """
         Compute νmax using coefficients of variation (Vianni et al. 2018)
         """
-        # self._supNyq_pg = Periodogram(
-        #     frequency=self._supNyq_freq * u.uHz,
-        #     power=self._supNyq_power * (1 / u.uHz)
-        # )
-        CoV_proxy = NumaxFromCoefficientsOfVariation(
-            lc=self._lc, 
-            pg=self._avg_pg, 
-            id=self._id,
-            initial_numax=self._initial_numax
+        CoV_proxy = NumaxFromCoefficientsOfVariation( 
+            psd=self.welch_psd if self.cov_config.use_welch else self.psd, 
+            config=self.config,
+            cov_config = self.cov_config,
+            id=self.star.target,
+            initial_numax=self.config.initial_numax
         )
-        numax = CoV_proxy.compute()
+        # use formalism of Bell+ (2019)?
+        if self.cov_config.use_Bell:
+            numax = CoV_proxy.compute_Bell().numax_estimate
+        else:
+            numax = CoV_proxy.compute().numax_estimate
 
-        if plot:
-            CoV_proxy.plot()
+        if self.cov_config.plot:
+            if self.cov_config.use_Bell:
+                CoV_proxy.plot_Bell()
+            else:
+                CoV_proxy.plot()
+        
+        if self.cov_config.save_info:
+            CoV_proxy.save_to_txt()
 
-        self._numax_estimates["numax_CoV"] = numax
+        self.numax_estimates["numax_CoV"] = numax
 
     def compute_numax_from_FliPer(self, plot=True):
         """
@@ -240,44 +119,238 @@ class NumaxProxies:
 
         self._numax_estimates["numax_FliPer"] = numax
 
+    def compute_numax_from_EACF(self):
+        """Compute numax with method from Mosser & Appourchaux (2009) and I.W. Roxburgh (2009)"""
+        EACF_proxy = NumaxFromEACF(
+            star = self.star,
+            psd = self.psd,
+            config = self.config,
+            eacf_config = self.eacf_config
+        )
+        EACF_proxy.compute()
+
+        if self.eacf_config.plot:
+            EACF_proxy.plot()
+
     def plotting(self):
         """
         Here we are going to plot the full spectrum with all numax estimates
         """
         plot_spectrum_with_all_numax_estimates(
-            self._pg.frequency, self._pg.power, self._numax_estimates, self._id
+            psd = self.psd,
+            star = self.star,
+            numax_estimates = self.numax_estimates
         )
 
     @property
-    def lc(self):
-        return self._lc
-
-    @property
-    def pg(self):
-        return self._pg
-
-    @property
-    def numax_estimates(self):
-        def is_valid(v):
+    def results(self):
+        rows = []
+        for label, numax in self.numax_estimates.items():
             try:
-                if hasattr(v, "nominal_value"):
-                    return np.isfinite(v.nominal_value)
-                return np.isfinite(v)
-            except Exception:
-                return False
+                numax_val = numax.n
+                numax_err = numax.s
+            except:
+                numax_val = numax
+                numax_err = None
+            rows.append({
+                "label": label,
+                "numax": numax_val,
+                "numax_err": numax_err,
+            })
+        df = pd.DataFrame(rows)
+        
+        # Save results?
+        if self.config.save_results:
+            df.to_csv(f'numax_proxies/results/{self.star.target}/{self.star.target}_results.txt', index=False)
+        
+        return pd.DataFrame(rows)
 
-        return {k: v for k, v in self._numax_estimates.items() if is_valid(v)}
+    def _load_lightcurve(self):
+        """Load light curve"""
+        gl = GetLightcurve(
+            target              =   self.star.target,
+            cadence             =   self.star.cadence,
+            sector              =   self.star.sector,
+            quarter             =   self.star.quarter,
+            mission             =   self.star.mission,
+            author              =   self.star.author,
+
+            fits_files_folder   =   self.lc_input.fits_file_folder,
+            lc_file             =   self.lc_input.lc_file,
+        )
+        # (potentially change GetLightcurve to output dataclasses rather than tuples)
+        time, flux, flux_err = gl.final_lc
+        self.unprocessed_lc = UnprocessedLightCurveData(
+            time = time,
+            flux = flux,
+            flux_err = flux_err
+        )
+
+    def _process_lightcurve(self):
+        """
+        Process lightcurve: 
+            1) sort by time
+            2) normalize
+            3) close gaps
+            4) compute periodogram
+        """
+
+        dp = DataProcessing(
+            lc=self.unprocessed_lc, 
+            config=self.config,
+            cov_config=self.cov_config,
+            id=self.star.target
+        )
+        # sort
+        if self.config.sort:
+            dp.sort_data_by_time()
+
+        # normalize to ppm
+        if self.config.normalize:
+            dp.normalize_flux()
+
+        # Sort by time and close gaps larger than "gap_size_days"
+        if self.config.close_gaps:
+            dp.close_gaps() 
+
+        # Save light curve as feather file
+        if self.config.save_lc:
+            dp.save_lc()
+
+        # Inject noise in ppm?
+        if self.config.add_noise:
+            dp.inject_noise()
+
+        # Savgol
+        if self.config.savgol:
+            dp.savgol_smooth()
+
+        # Compute PSD with frequencies in microHz 
+        dp.microHz_periodogram()  
+
+        # Light curve (potentially change DataProcessing to output dataclasses rather than tuples)
+        time, flux, flux_err = dp.final_lc
+        self.lc = LightCurveData(
+            time = time,
+            flux = flux,
+            flux_err = flux_err
+        )
+
+        # PSD (potentially change DataProcessing to output dataclasses rather than tuples)
+        frequency, psd = dp.final_psd
+        self.psd = PSDData(
+            frequency = frequency,
+            psd = psd
+        )
+
+        # Averaged PSD
+        if self.config.do_avg_psd:
+            chunk_length = self.config.avg_psd_chunk
+            dp.averaged_psd(chunk_len=chunk_length)
+            avg_psd_freq, avg_psd_power = dp.avg_psd
+            self.avg_psd = AvgPSDData(
+                frequency = avg_psd_freq,
+                psd = avg_psd_power
+            )
+        
+        # Welch PSD
+        if self.cov_config.use_welch:
+            welch_freq, welch_psd = dp.calculate_welch_spectrum().welch_psd
+            self.welch_psd = AvgPSDData(
+                frequency = welch_freq,
+                psd = welch_psd
+            )            
+
+        # Plot lc and pg
+        if self.config.plot_lc:
+            dp.plot_lc_and_pg()
+
+        if self.config.save_psd:
+            dp.save_periodogram()
+
+        if self.config.save_avgpsd:
+            dp.save_avg_periodogram()
+
+    def _query_gaia(self):
+        """Query gaia if specified"""
+        if self.config.query_gaia:
+            gaia_dictionary = query_gaia(id=self.star.target)
+            if gaia_dictionary:
+                self.gaia_data = GaiaData(**gaia_dictionary)
+            else:
+                self.gaia_data = GaiaData()
+        else:
+            self.gaia_data = GaiaData()
+            
+    def _load_psd(self, filename : str):
+        """Load PSD file from filename if specified in YAML input file"""
+        if filename.endswith('.csv'):
+            data = np.genfromtxt(
+                filename, delimiter=",", names=["frequency", "power"]
+            )
+        elif filename.endswith('feather') or filename.endswith('.ftr'):
+            data = feather.read_feather(filename)
+        
+        mask = (
+                ~np.isnan(data["frequency"])
+                & ~np.isnan(data["power"])
+            )
+        data = data[mask]
+        return data['frequency'], data['power']
+
+    @classmethod
+    def read_yaml(cls, yaml_path: str):
+        """Grab config parameters from yaml file"""
+        with open(yaml_path, 'r') as f:
+            yaml_file = yaml.safe_load(f)
+        # Store information in GlobalConfig structure
+        settings = GlobalConfig(
+            star=StarInfo(**yaml_file["STAR"]),
+            lightcurve=LightCurveInput(**yaml_file["LIGHTCURVE"]),
+            psd=PSDInput(**yaml_file['PSD']),
+            config=ProcessingConfig(**yaml_file["CONFIG"]),
+            acf_config=ACFConfig(**yaml_file["ACF_CONFIG"]),
+            cov_config=COVConfig(**yaml_file["COV_CONFIG"])
+        )
+        return cls(global_config=settings)
     
-# @dataclass
-# class StarInfo:
-#     target      :   str
-#     cadence     :   str = 'long'
-#     author      :   str
-#     quarter     :   list = np.range(0,100)
-#     sector      :   list = np.range(0,100)
-#     mission     :   str
-#     logg        :   float
-#     teff        :   float
-#     mag         :   float
+    def run(self) -> "NumaxProxies":
+        """Run pipeline"""
+        # Query Gaia DR3/2 for data
+        self._query_gaia()
+
+        if self.psd_input.psd_file:
+            self.psd = PSDData(
+                self._load_psd(self.psd_input.psd_file)
+            )
+
+        if self.psd_input.avg_psd_file:
+            self.avg_psd = AvgPSDData(
+                self._load_psd(self.psd_input.avg_psd_file)
+            )
+        else:
+            self._load_lightcurve()
+            self._process_lightcurve() 
+        
+        return self
+        
+        
+
+
+        
+
+
+
+
+
+
+
+
+    
+
+    
+
+
+
 
 

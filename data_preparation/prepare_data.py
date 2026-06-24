@@ -242,7 +242,7 @@ def sort_data_by_time(lc):
     return time, flux, flux_err
 
 
-def close_gaps(time):
+def close_gaps(time : list):
     """
     Function that closes gaps, but forces minimum gap size of three days.
 

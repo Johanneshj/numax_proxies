@@ -2,17 +2,17 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from .corr_acf_and_fft_acf import batch_fft_acf, abs_acf, abs_acf_linear
 import time as t
-import matplotlib.pyplot as plt
+from numpy.typing import NDArray
+from ...data_preparation.dataclasses import ACFConfig
 
 
-def calculate_two_dim_ACF(frequency=None, power=None, plot=False, 
-                          sliding_window_flag='log_numax', acf_params={}):
+def calculate_two_dim_ACF(frequency : NDArray, power : NDArray, acf_config : ACFConfig):
     """
     Calculate 2D autocorrelation function:
         Three options are provided:
         1. Linear sliding window (Huber+ 2009, Viania+ 2019):
             This method works ok, but fails at lower frequencies
-        2. Logarithmic sliding window (this work):
+        2. Logarithmic sliding window:
             This method can give OK results, but is very dependent on tuning bin sizes and width, 
             which complicates things
         3. Other method (Viani+ 2019):
@@ -32,9 +32,9 @@ def calculate_two_dim_ACF(frequency=None, power=None, plot=False,
             -> needed for plotting and collapsed ACF.
     """
     
-    
     start = t.time()
     # Check flags
+    sliding_window_flag = acf_config.sliding_window_style
     if sliding_window_flag == 'linear':
         # Linear sliding window
         freq_windows, power_windows = linear_sliding_window(
@@ -57,33 +57,36 @@ def calculate_two_dim_ACF(frequency=None, power=None, plot=False,
         # Calculate acf for each segment
         acf = [abs_acf(seg) for seg in power_windows]
     elif sliding_window_flag == 'log_numax':
-        # Special sliding window (Viani et al. 2019)
-        # Check if we defined some of the sliding window parameters our selves:
-        overlap_scale = acf_params.get('ACF_overlap_scale')
-        min_num_points = acf_params.get('ACF_min_num_points')
-        min_freq = acf_params.get('ACF_min_freq')
-        print(min_freq)
-        width_factor = acf_params.get('ACF_width_factor')
-        # Grab the remaining with binning_parameters function
-        overlap_scale, min_num_points, min_freq, width_factor = binning_parameters(frequency, overlap_scale, min_num_points, min_freq, width_factor)
+        ## Special sliding window (Viani et al. 2019
+        # Grab parameters with binning_parameters function
+        overlap_scale, min_num_points, min_freq, width_factor = binning_parameters(
+            frequency, 
+            acf_config.overlap_scale, 
+            acf_config.min_num_points, 
+            acf_config.min_freq, 
+            acf_config.width_factor
+        )
+
         freq_windows, power_windows = other_binning(
             frequency=frequency,
             power=power,
             overlap_scale=overlap_scale,
             min_num_points=min_num_points,
             min_freq=min_freq,
-            max_freq=None,
+            max_freq=acf_config.max_freq,
             width_factor=width_factor
         )
         # Calculate acf for each segment
         acf = [abs_acf(seg) for seg in power_windows]
-
+    else:
+        raise ValueError(f"Unknown sliding window configuration style: '{sliding_window_flag}'")
     end = t.time()
-    print(f'2D ACF calculation time: {np.round(end-start, 2)} seconds')
+    print(f'2D ACF calculation time: {np.round(end-start, 3)} seconds')
 
     return acf, freq_windows
 
-def binning_parameters(frequency, overlap_scale=None, min_num_points=None, min_freq=None, width_factor=None):
+def binning_parameters(frequency : NDArray, overlap_scale : float = None, min_num_points : int = None, 
+                       min_freq : float = None, width_factor : float = None):
     """
         Sliding window parameters for log_numax sliding window (Viani+ 2019).
         This parameters have been determined by trial-and-error.
@@ -111,7 +114,7 @@ def binning_parameters(frequency, overlap_scale=None, min_num_points=None, min_f
         width_factor = 1 if width_factor is None else width_factor
     return overlap_scale, min_num_points, min_freq, width_factor
 
-def log_sliding_window(frequency, power, overlap_scale=2):
+def log_sliding_window(frequency : NDArray, power : NDArray, overlap_scale : float = 2):
     '''Log sliding window - testing has revealed that log_numax generally performs better'''
     # Define bin centers in log space
     bin_centers, bin_widths = get_bins(frequency=frequency)
@@ -129,7 +132,7 @@ def log_sliding_window(frequency, power, overlap_scale=2):
             power_windows.append(power_window)
     return freq_windows, power_windows
 
-def bin_centers_and_widths(frequency):
+def bin_centers_and_widths(frequency : NDArray):
     """
         Bin centers are widths for log sliding window.
         These values are found by trial-and-error, in general,
@@ -138,8 +141,8 @@ def bin_centers_and_widths(frequency):
     nu_nyq = np.max(frequency)
     # For short cadence we cut the spectrum from 100 muHz,
     # which isn't perfect
-    print('length of spec:', len(frequency))
-    print('resolution:', np.mean(np.diff(frequency)))
+    # print('length of spec:', len(frequency))
+    # print('resolution:', np.mean(np.diff(frequency)))
     if nu_nyq > 5000: # Short cadence
         bin_centers = np.geomspace(
             1,
@@ -178,7 +181,7 @@ def bin_centers_and_widths(frequency):
         )
     return bin_centers, bin_widths
 
-def linear_sliding_window(frequency, power):
+def linear_sliding_window(frequency : NDArray, power : NDArray):
     """Linear sliding window (Viani+ 2019)"""
     df = np.mean(np.diff(frequency))
 
@@ -197,7 +200,9 @@ def linear_sliding_window(frequency, power):
     power_windows = sliding_window_view(power, window_shape=window_size)[::step].copy()
     return freq_windows, power_windows
 
-def other_binning(frequency, power, overlap_scale=2, min_num_points=200, min_freq=100, max_freq=None, width_factor=1):
+def other_binning(frequency : NDArray, power : NDArray, 
+                  overlap_scale : float = 2, min_num_points : int = 200, 
+                  min_freq : float = 100, max_freq : float = None, width_factor : float = 1):
     """
         Perform sliding window as used for CoV method in Viani+ 2019.
         Basically, around each bin center the bin size will be defined as
@@ -246,7 +251,7 @@ def other_binning(frequency, power, overlap_scale=2, min_num_points=200, min_fre
 
     return fs, ps
 
-def other_binning_freqs_power(center, width, frequency, power):
+def other_binning_freqs_power(center : float, width : float, frequency : NDArray, power : NDArray):
     """
     Grab frequency and power values in bins defined with other_binning function.
 
@@ -257,7 +262,7 @@ def other_binning_freqs_power(center, width, frequency, power):
         power :: PSD
 
     Return:
-        CoV :: Coefficient of Variation in bin
+        frequency and power of bin
     """
     lower = center - width / 2
     upper = center + width / 2
@@ -269,7 +274,7 @@ def other_binning_freqs_power(center, width, frequency, power):
 
     return frequency[index_bin], power[index_bin]
 
-def get_bins(frequency, min_points=20):
+def get_bins(frequency : NDArray, min_points : float = 20):
     """Use frequency array to get the optimal geometric windows"""
     f = frequency # frequency array
     df = np.mean(np.diff(frequency)) # Resolution

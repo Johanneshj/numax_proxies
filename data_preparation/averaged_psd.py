@@ -1,9 +1,12 @@
 import numpy as np
 import lightkurve as lk
 import time as t
+from .dataclasses import LightCurveData
+from numpy.typing import NDArray
+from .data_processing import DataProcessing
+# This one is techically not needed !!!!!
 
-
-def mean_psd(lc=None, cadence=None):
+def mean_psd(lc : LightCurveData):
     """
     Author: Sylvain Breton
     email: sylvain.breton@inaf.it
@@ -33,12 +36,11 @@ def mean_psd(lc=None, cadence=None):
       vectors.
     """
 
-    time = lc.time.value
-    flux = lc.flux.value
-    flux_err = lc.flux_err.value
+    time = lc.time
+    flux = lc.flux
+    flux_err = lc.flux_err
 
     dt = np.median(np.diff(time))
-    print(dt, 0.5 * (30 / (30 * 2 * 24)))
     len_chunk = 90
 
     size_chunk = int(len_chunk / dt)
@@ -53,7 +55,6 @@ def mean_psd(lc=None, cadence=None):
     flux_err = flux_err[: size_chunk * n_chunk].reshape((n_chunk, size_chunk))
 
     # Initialising with first chunk
-    start = t.time()
     freq, psd = calculate_psd_for_mean_psd(
         time[0], flux[0], flux_err[0], freq_grid=None
     )
@@ -67,13 +68,11 @@ def mean_psd(lc=None, cadence=None):
     psd /= n_chunk
 
     pg = lk.periodogram.Periodogram(frequency=freq, power=psd)
-    end = t.time()
-    print(f"computation time for averaged psd: {end - start:.4f} seconds")
 
     return pg
 
 
-def calculate_psd_for_mean_psd(time, flux, flux_err, freq_grid):
+def calculate_psd_for_mean_psd(time : NDArray, flux : NDArray, flux_err : NDArray, freq_grid : NDArray):
     """
     Calculate PSD using Lightkurve's .to_periodogram()
 
@@ -86,13 +85,15 @@ def calculate_psd_for_mean_psd(time, flux, flux_err, freq_grid):
         frequeancy  : lightkurve Periodogram object
         power_sd    : power spectral density
     """
-    lc = lk.LightCurve(time=time, flux=flux, flux_err=flux_err)
-    pg = lc.to_periodogram(
-        freq_unit="uHz", normalization="psd", center_data=True, frequency=freq_grid
+    dp = DataProcessing(
+        time = time,
+        flux = flux,
+        flux_err = flux_err
     )
-    frequency = pg.frequency
-    power_sd = pg.power
+    dp.microHz_periodogram()
+    _, psd = dp.final_psd
+    
     if freq_grid is None:
-        return frequency, power_sd
+        return freq_grid, psd
     else:
-        return power_sd
+        return psd

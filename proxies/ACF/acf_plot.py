@@ -1,9 +1,11 @@
 import numpy as np
 from matplotlib.colors import LogNorm
 import numpy as np
+from numpy.typing import NDArray
 
 
-def plot_spec(frequency, power, smoothed_power, ax, id):
+def plot_spec(frequency : NDArray, power : NDArray, smoothed_power : NDArray, ax : NDArray, id : str):
+    """Plot spectrum."""
     ax.loglog(frequency, power, c="gray", label="mean spectrum")
     ax.loglog(frequency, smoothed_power, c="k", label="median filter")
     ax.set_xlabel("frequency [μHz]")
@@ -12,7 +14,9 @@ def plot_spec(frequency, power, smoothed_power, ax, id):
     ax.text(0.02, 0.02, f"{id}", ha="left", va="bottom", transform=ax.transAxes)
     ax.legend()
 
-def plot_collapsed_acf_with_gaussian_fit(collapsed_2D_acf, unsmoothed_acf, freq_centers, fit_vals, initial_numax, ax):
+def plot_collapsed_acf_with_gaussian_fit(collapsed_2D_acf : NDArray, unsmoothed_acf : NDArray, 
+                                         freq_centers : NDArray, fit_vals : NDArray, initial_numax : float, ax : NDArray):
+    """Plot collapsed ACF from log-sliding window with Gaussian fit"""
     def gaussian(x, A, sigma, mu):
         return A * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
     

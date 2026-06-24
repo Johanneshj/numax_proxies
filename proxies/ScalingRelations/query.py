@@ -5,29 +5,29 @@ from uncertainties import ufloat
 from pyvo.dal.exceptions import DALFormatError
 from requests.exceptions import ConnectionError
 import time as t
+from ...data_preparation.dataclasses import GaiaData
 
 
 def query_gaia(id=None, ra=None, dec=None):
-
+    """Query Gaia database given identifier"""
     try:
         gaia_id = query_simbad(object_name=id) 
     except Exception as e:
         print('SIMBAD query failed:', e)
-        return {}
+        return None
     
     if gaia_id is None:
-        return {}
+        return None
     
-
     try:
         QUERY = get_query(gaia_id)
         job = Gaia.launch_job_async(QUERY)
-        results = return_dict(job)
-        return results
+        res = job.get_results()
+        gaia_data = convert_to_GaiaData_dataclass(res)
+        return gaia_data
     except Exception as e:
         print('Gaia query failed:', e)
-        return {}
-
+        return None
 
 def get_query(id):
 
@@ -64,7 +64,6 @@ def get_query(id):
             """
 
     return QUERY
-
 
 def return_dict(job=None):
 
@@ -122,7 +121,6 @@ def return_dict(job=None):
 
     return dictionary
 
-
 def query_simbad(object_name, retries=3, delay=1.5):
     """Query SIMBAD with retries to account for time-outs"""
     for attempt in range(retries):
@@ -142,6 +140,62 @@ def query_simbad(object_name, retries=3, delay=1.5):
                 t.sleep(delay)
             else:
                 return None  # SIMBAD query time-out even after retries
+
+def convert_to_GaiaData_dataclass(res):
+    """Convert results from GaiaQuery to GaiaData dataclass"""
+    gaia_data = GaiaData()
+    for col in res.colnames:
+        # Skip lower/upper columns and source id
+        if (
+            col.endswith("_lower")
+            or col.endswith("_upper")
+            or col.endswith("source_id")
+            or col.endswith("_uncertainty")
+        ):
+            continue
+
+        # Assign lower and upper
+        lower_col = f"{col}_lower"
+        upper_col = f"{col}_upper"
+        uncertainty_col = f"{col}_uncertainty"
+
+        # Check for nans
+        val = res[col]  # if col is res.colnames else np.nan
+        val_lower = res[lower_col] if lower_col in res.colnames else np.nan
+        val_upper = res[upper_col] if upper_col in res.colnames else np.nan
+        val_uncertainty = (
+            res[uncertainty_col] if uncertainty_col in res.colnames else np.nan
+        )
+
+        # Calculate uncertainties/errors
+        err = get_error(val, val_lower, val_upper, val_uncertainty)
+
+        if np.isfinite(val) and np.isfinite(err):
+            setattr(gaia_data, col, ufloat(val, err))
+    
+    return gaia_data
+
+def get_error(val, val_lower, val_upper, val_uncertainty):
+    """Calculate errors on Gaia parameters given lower/upper vals (very rough)"""
+    if np.isnan(val_uncertainty) and np.isfinite(val_lower) and np.isnan(val_upper):
+        err = val - val_lower
+    elif (
+        np.isnan(val_uncertainty) and np.isfinite(val_upper) and np.isnan(val_lower)
+    ):
+        err = val_upper - val
+    elif np.isfinite(val_uncertainty):
+        err = val_uncertainty
+    elif (
+        np.isnan(val_uncertainty)
+        and np.isfinite(val_lower)
+        and np.isfinite(val_upper)
+    ):
+        err = (val_upper - val_lower) / 2
+    else:
+        err = np.nan
+    return err
+
+
 
 
 # def get_gaia_id(object_name):

@@ -1,24 +1,36 @@
 from .ScalingRelations import (
     compute_numaxes
 )
-
+from typing import Optional
+from ..data_preparation.dataclasses import GaiaData, ProcessingConfig, StarInfo
 
 class NumaxFromScalingRelations:
-    def __init__(self, id, *args, **kwargs):
-        self._id = id or "unknown"
+    def __init__(self,
+                 star : StarInfo,
+                 config : ProcessingConfig,
+                 gaia_data : Optional[GaiaData]
 
-        if kwargs.get("gaia_query_dict"):
-            self._gaia_query_dict = kwargs.get("gaia_query_dict")
+        ):
+        # Initialize
+        self.star = star
+        self.config = config
+    
+        # Is gaia data already found?
+        if gaia_data.has_data():
+            self.gaia_data = gaia_data
         else:
-            self._gaia_query_dict = None
+            self.gaia_data = None
 
-        self._numaxes = None
-
-    def compute(self, *args, **kwargs):
+    def compute(self):
         """
         Compute νmax using the scaling relations.
         """
-        self._numaxes = compute_numaxes(
-            id=self._id, gaia_query_dict=self._gaia_query_dict, *args, **kwargs
+        self.numaxes = compute_numaxes(
+            star = self.star, 
+            gaia_data = self.gaia_data
         )
-        return self._numaxes
+        return self
+
+    @property
+    def numax_estimates(self) -> dict:
+            return self.numaxes

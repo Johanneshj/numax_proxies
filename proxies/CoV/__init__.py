@@ -8,7 +8,7 @@ from .calculate_coefficients import (
     smooth_CoV_values,
     numax_estimate_CoV,
 )
-from .plot_CoV import plot_CoV_vs_bin_centers, plot_supNyq_spec
+from .plot_CoV import plot_CoV_vs_bin_centers, plot_supNyq_spec, plot_CoV_Bell
 
 __all__ = [
     "calculate_CoV",
@@ -17,4 +17,5 @@ __all__ = [
     "numax_estimate_CoV",
     "plot_CoV_vs_bin_centers",
     "plot_supNyq_spec",
+    "plot_CoV_Bell",
 ]

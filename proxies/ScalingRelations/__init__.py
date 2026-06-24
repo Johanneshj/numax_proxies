@@ -9,7 +9,7 @@ from .query import (
 )
 from .scaling_relations import (
     numax_scaling_relations,
-    make_broadcastable_uarray,
+    make_uarray,
     compute_numaxes,
 )
 

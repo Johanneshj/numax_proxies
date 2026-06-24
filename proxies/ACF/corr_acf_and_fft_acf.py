@@ -1,7 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from numpy.typing import NDArray
+from scipy.signal import correlate
 
-def batch_fft_acf(power_windows):
+def batch_fft_acf(power_windows : NDArray):
     """
     Autocorrelation by means of FFT.
     Suitable for SC data if sliding_window is linear.
@@ -26,7 +28,7 @@ def batch_fft_acf(power_windows):
     return abs(acf)
 
 
-def abs_acf(x):
+def abs_acf(x : NDArray):
     """
     Autocorrelation by means of np.correlate(x,x).
     Normalization tailored to log sliding windows
@@ -37,19 +39,22 @@ def abs_acf(x):
     Output:
         np.abs(corr) * scaling :: normalized absolute autocorrelation
     """
-
+    # print(len(x), np.max(x))
     # Subtract mean
     x -= np.mean(x)  
 
     # Perform ACF on segment (x)
-    corr = np.correlate(x, x, mode="full")
+    corr = correlate(x, x, mode='full')
+    # corr = np.correlate(x, x, mode="full")
     corr = corr[corr.size // 2 :]  # grab only the positive lags
     
-    scaling = np.var(x) / np.sqrt(len(x))
+    scaling = 1 / np.sqrt(len(x))
+    # scaling = np.var(x) / np.sqrt(len(x))
+    # print(len(x))
 
     return np.abs(corr) * scaling
 
-def abs_acf_linear(x):
+def abs_acf_linear(x : NDArray):
     """
     Autocorrelation by means of np.correlate(x,x).
     Normalization is different when we are using a linear sliding window.

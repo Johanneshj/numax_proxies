@@ -7,6 +7,7 @@ from .add_noise import calculate_noise
 from .get_lightcurve import GetLightcurve
 from .data_processing import DataProcessing
 from .prepare_data import read_json_file
+from .dataclasses import LightCurveData, LightCurveInput, PSDData, AvgPSDData, ProcessingConfig, StarInfo
 
 __all__ = [
     "mean_psd",
@@ -14,4 +15,10 @@ __all__ = [
     "GetLightcurve",
     "DataProcessing",
     "read_json_file",
+    "LightCurveData",
+    "LightCurveInput",
+    "PSDData",
+    "AvgPSDData",
+    "ProcessingConfig",
+    "StarInfo"
 ]

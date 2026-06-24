@@ -6,7 +6,9 @@ import numpy as np
 import warnings
 from scipy.optimize import curve_fit
 from scipy.optimize import OptimizeWarning
-# from scipy.ndimage import median_filter
+from typing import Optional
+from numpy.lib.stride_tricks import sliding_window_view
+from numpy.typing import NDArray
 
 
 def calculate_CoV(center, width, frequency, power):
@@ -33,15 +35,17 @@ def calculate_CoV(center, width, frequency, power):
 
     # Is bin length zero?
     if len(index_bin) == 0:
-        return np.nan
+        CoV = 1.
+        return CoV
 
     bin_power = power[index_bin]
     bin_power = bin_power[np.isfinite(bin_power)]
 
     # Is bin power atleast length 1?
     if len(bin_power) <= 1:
-        return np.nan
-
+        CoV = 1.
+        return CoV
+    
     mean = np.mean(bin_power)
 
     # Is mean finite and non-zero?
@@ -55,17 +59,16 @@ def calculate_CoV(center, width, frequency, power):
         return np.nan
 
     # Then we calculate CoV
-    # CoV = np.sqrt(std**2 / (mean**2 + std**2))
     CoV = (std / mean)
-    # CoV = np.nanquantile(bin_power, 0.25)/np.median(bin_power)
-    # CoV /= len(bin_power)
-    # CoV /= np.var(bin_power)
-    # CoV *= np.var(bin_power)/np.sqrt(len(bin_power))
 
     return CoV
 
 
-def bin_spectrum(frequency=None, power=None, overlap_factor=10):
+
+
+def bin_spectrum(frequency=None, power=None, min_freq : Optional[float] = None, 
+                 overlap_factor : Optional[float] = None, use_linear_bins : Optional[bool] = False,
+    ):
     """
     Binning of spectrum based on formalism by Viani et al. (2018).
     Spectrum is binned in segments with size 0.267 * numax^0.764 (Yu et al. 2018),
@@ -85,8 +88,26 @@ def bin_spectrum(frequency=None, power=None, overlap_factor=10):
         mean_power
     """
 
+    if use_linear_bins:
+        freq_windows, power_windows = linear_binning(
+            frequency=frequency,
+            power=power
+        )
+        stds = np.nanstd(power_windows, axis=1, ddof=1)
+        means = np.nanmean(power_windows, axis=1)
+        CoVs = stds / means
+        bin_centers = np.nanmean(freq_windows, axis=1)
+        return bin_centers, CoVs
+
+
+    if min_freq is None:
+        min_freq = 1.0
+
+    if overlap_factor is None:
+        overlap_factor = 6.0
+
     # In this while-loop we'll create the bin centers
-    bin_centers = [1.0]  # starting point is 0.1 muHz (1 muHz in Viani)
+    bin_centers = [min_freq]  # starting point is 0.1 muHz (1 muHz in Viani)
     bin_widths = [0.267 * bin_centers[0] ** 0.764]
     while bin_centers[-1] < frequency[-1]:
         next_center = bin_centers[-1] + (0.267 * bin_centers[-1] ** 0.764) / overlap_factor
@@ -107,15 +128,11 @@ def bin_spectrum(frequency=None, power=None, overlap_factor=10):
     bin_centers = bin_centers[valid]
     CoVs = CoVs[valid]
 
-    # Regularize the data
-    CoVs -= np.nanmedian(CoVs)
-    CoVs /= np.max(CoVs)
-
     # Return bin_centers (frequencyes) and associated CoV values
     return np.asarray(bin_centers), np.asarray(CoVs)
 
 
-def smooth_CoV_values(bin_centers, CoVs):
+def smooth_CoV_values(bin_centers, CoVs, smoothing_width_factor : Optional[float]=None):
     """
         Smooth CoV values following Viani et al. (2018).
         Smoothing window has size 0.66*bin_central^0.88
@@ -127,20 +144,18 @@ def smooth_CoV_values(bin_centers, CoVs):
         Outputs:
             smoothed_CoVs   : smoothed CoV values
     """
+    if smoothing_width_factor is None:
+        smoothing_width_factor = 1.0
+
     smoothed_CoVs = [
-        smoothing_func(center, bin_centers, CoVs) for center in bin_centers
+        smoothing_func(center, bin_centers, CoVs, smoothing_width_factor) for center in bin_centers
     ]
 
-    # Regularize data for Gaussian fit (if initial numax specified)
-    smoothed_CoVs = np.asarray(smoothed_CoVs, dtype=float)
-    smoothed_CoVs -= np.nanmedian(smoothed_CoVs)
-    smoothed_CoVs /= np.max(smoothed_CoVs)
-
     # Return smoothed CoVs
-    return CoVs#np.asarray(smoothed_CoVs)
+    return np.asarray(smoothed_CoVs)
 
 
-def smoothing_func(center, bin_centers, CoVs):
+def smoothing_func(center, bin_centers, CoVs, smoothing_width_factor):
     '''
         Smoothing function as described in Viani et al. (2018).
         Spectrum is smoothed as medium of bins with 
@@ -155,7 +170,7 @@ def smoothing_func(center, bin_centers, CoVs):
             smoothed_val    : smoothed val in bin
     '''
 
-    width = 0.66 * center**0.88
+    width = smoothing_width_factor * 0.66 * center**0.88
     lower = center - width / 2
     upper = center + width / 2
     indices = np.where((bin_centers >= lower) & (bin_centers < upper))[0]
@@ -163,6 +178,7 @@ def smoothing_func(center, bin_centers, CoVs):
         smoothed_val = np.nanmean(CoVs[indices])
     else:
         smoothed_val = np.nan
+
     return smoothed_val
 
 
@@ -254,9 +270,6 @@ def fit_for_numax(x, y, numax_init, window=500):
         with warnings.catch_warnings():
             warnings.simplefilter("error", OptimizeWarning)
 
-        # log space frequencies
-        # x = np.log10(x)
-
         # Safety check
         valid = np.isfinite(x) & np.isfinite(y)
         x = x[valid]
@@ -264,19 +277,17 @@ def fit_for_numax(x, y, numax_init, window=500):
 
         # Initial guesses
         amp0 = 0.9 * np.max(y)
-        # w0 = 0.1
-        # numax0 = np.log10(numax_init)
         numax0 = numax_init
         w0 = (2/3) * numax0 ** (22/25)
         p0s = [amp0, w0, numax0]
 
         # Bounds
         lower_bounds = [0, 0, np.min(x)]
-        upper_bounds = [1, 2*w0, np.max(x)]
+        upper_bounds = [np.max(y), 2*w0, np.max(x)]
         
         # Fit
         popt, pcov = curve_fit(
-            gaussian,
+            gaussian_with_offset,
             x,
             y,
             p0=p0s,
@@ -289,7 +300,8 @@ def fit_for_numax(x, y, numax_init, window=500):
         succesful_fit = True
         return numax, popt, succesful_fit
 
-    except (RuntimeError, OptimizeWarning, ValueError):
+    except (RuntimeError, OptimizeWarning, ValueError) as e:
+        print(f'fit failed because of "{e}"')
         # If fit fails return numax as location of highest peak in a region around numax_init
         mask = (x >= numax_init - window) & (x <= numax_init + window)
         return x[mask][np.argmax(y[mask])], np.nan, succesful_fit
@@ -300,6 +312,25 @@ def normalize_0_1(x):
     xmax = np.nanmax(x)
     return (x - xmin) / (xmax - xmin)
 
-def gaussian(x, A, sigma, mu):
+def gaussian_with_offset(x, A, sigma, mu):
     """Gaussian function"""
-    return A * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
+    return 1 + A * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
+
+def linear_binning(frequency : NDArray, power : NDArray):
+    """Linear sliding window (Viani+ 2019)"""
+    df = np.mean(np.diff(frequency))
+
+    if np.max(frequency) > 300:
+        window_size_muHz = 10  # window width
+        overlap_muHz = 9  # overlap
+    else:
+        window_size_muHz = 50  # window width
+        overlap_muHz = 40  # overlap
+
+    window_size = int(window_size_muHz / df)
+    step = int((window_size_muHz - overlap_muHz) / df)
+    if step <= 0:
+        step = 10  # failsafe
+    freq_windows = sliding_window_view(frequency, window_shape=window_size)[::step]
+    power_windows = sliding_window_view(power, window_shape=window_size)[::step].copy()
+    return freq_windows, power_windows

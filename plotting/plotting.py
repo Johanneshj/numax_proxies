@@ -1,12 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+from ..data_preparation.dataclasses import PSDData, StarInfo
 
-
-def plot_spectrum_with_all_numax_estimates(frequency, power, numax_dict, id):
+def plot_spectrum_with_all_numax_estimates(psd : PSDData, star : StarInfo, numax_estimates : dict):
     fig, ax = plt.subplots()
-    ax.loglog(frequency, power, c="gray")
-    for label, numax in numax_dict.items():
+    ax.loglog(psd.frequency, psd.psd, c="gray")
+    for label, numax in numax_estimates.items():
         try:
             numax_val = numax.n
             numax_err = numax.s
@@ -34,10 +34,10 @@ def plot_spectrum_with_all_numax_estimates(frequency, power, numax_dict, id):
             ax.axvspan(numax_val - numax_err, numax_val + numax_err, alpha=0.2, color=c)
     ax.set_xlabel("Frequency")
     ax.set_ylabel("Power")
-    ax.set_xlim(np.min(frequency.value), np.max(frequency.value))
-    ax.text(0.02, 0.02, f"{id}", ha="left", va="bottom", transform=ax.transAxes)
+    ax.set_xlim(np.min(psd.frequency), np.max(psd.frequency))
+    ax.text(0.02, 0.02, f"{star.target}", ha="left", va="bottom", transform=ax.transAxes)
     ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
-    savepath = os.path.join("numax_proxies", "results", id, "figures")
+    savepath = os.path.join("numax_proxies", "results", f'{star.target}', "figures")
     os.makedirs(savepath, exist_ok=True)
     fig.savefig(
         f"{savepath}/full_spectrum_with_all_estimates.png", dpi=300, bbox_inches="tight"

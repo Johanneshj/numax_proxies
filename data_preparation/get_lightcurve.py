@@ -151,7 +151,7 @@ class GetLightcurve:
             & ~np.isnan(data["flux"])
         )
         data = data[mask]
-        self._time = np.array(data["time"]) / 86400
+        self._time = np.array(data["time"])
         self._flux = np.array(data["flux"])
         self._flux_err = np.ones_like(self._flux) * np.nanstd(self._flux)
         return mask
