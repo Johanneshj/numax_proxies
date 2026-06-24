@@ -4,46 +4,40 @@
 
 ---
 ## Methods
+  - **Coeffecients of variation.**
   - **2D ACF:**
     - Follows the methodology of Huber+ 2009 and Viani+ 2019.
     - Computes 2D ACF from PSD $\rightarrow$ collapsed the ACF to 1D $\rightarrow$ fits Gaussian to estimate $\nu_\text{max}$.
-    - Scaling relations
-    - Coeffecients of variation.
-    - FliPer (Bugnet+ 2018)
+  - **Scaling relations**.
+  - **FliPer (Bugnet+ 2018)** *(Experimental)*
   - More to come..
-    - Entropy.
-    - etc...
+    - Entropy, GAU, etc...
    
 ## Installation
 ```bash
 git clone https://github.com/Johanneshj/numax_proxies.git
 pip install numax_proxies
 ```
-
 --- 
 ## How to
 **Open a Jupyer Notebook or something similar**
 ```python
 from numax_proxies import NumaxProxies
-import numpy as np
-import json
 ```
 ```python
-data = {
-    'target' : 'KIC12008916',
-    'cadence' : 'long',
-    'author' : 'Kepler',
-    'quarter' : np.arange(0,61).tolist(),
-    'sector' : None,
-    'logg' : None,
-    'teff' : None
-}
-with open("KIC12008916.json", "w") as f:
-    json.dump(data, f, indent=4)
-```
-```python
-proxy = NumaxProxies("KIC12008916.json")
-proxy.compute_acf()
+  # Initialize numax proxies
+  proxy = NumaxProxies.read_yaml('numax_proxies/stars/KIC1872517.yaml').run()
+
+  # Compute estimates
+  proxy.compute_numax_from_acf()
+  proxy.compute_numax_from_CoV()
+  proxy.compute_numax_from_scaling_relations()
+
+  # Plot all estimates
+  proxy.plotting()
+
+  # Get results
+  res = proxy.results
 ```
 
 --- 
@@ -58,32 +52,6 @@ proxy.compute_acf()
 - **Averaged PSD** - for short-cadence data and long light curves computation time is significantly reduced by computing an averaged power spectrum.
 - **Plots** - each numax proxy also has the option to plot the steps in the methodology. A final spectrum with all estimates can also be drawn.
 
-```python
-# For example
-data = {
-    'target' : f'{name}',
-    'cadence' : 'long',
-    'author' :  'Kepler',
-    'quarter' : np.arange(0,100).tolist(),
-    'sector' : None,
-    # 'logg' : None,
-    # 'teff' : None,
-    # 'mag' : None
-}
-
-proxy = NumaxProxies(f"stars/{name}.json",
-                     lc_file='location/lightcurve.csv',
-                     fits_files_folder=None, 
-                     normalize=True,
-                     plot_lc=False,
-                     avg_psd=True)
-proxy.compute_numax_from_acf(plot=True)
-proxy.compute_numax_from_CoV(plot=True)
-proxy.compute_numax_from_scaling_relations()
-proxy.compute_numax_from_FliPer(plot=True)
-proxy.plotting()
-numax_estimates = proxy.numax_estimates
-```
 ---
 ## To-do
 - **Implement more $\nu_\text{max}$ proxies**: Currently have 2D ACF, Coefficients of variation, and scaling relations.
