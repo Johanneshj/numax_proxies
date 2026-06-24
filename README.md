@@ -54,4 +54,4 @@ Example of full spectrum with all numax estimates
 Example of ACF method
 ![Example of ACF method](KIC1872517/figures/ACF.png)
 Example of Coefficients of Variation method
-![Example of CoV method](KIC1872517/figures/CoVs.png)
+![Example of CoV method](KIC1872517/figures/CoVs_Bell.png)
