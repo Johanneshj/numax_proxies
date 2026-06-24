@@ -50,8 +50,8 @@ res = proxy.results
 ---
 ## Example Results
 Example of full spectrum with all numax estimates
-![Full spectrum](numax_proxies/KIC1872517/figuresfull_spectrum_with_all_estimates.png)
+![Full spectrum](KIC1872517/figures/full_spectrum_with_all_estimates.png)
 Example of ACF method
-![Example of ACF method](numax_proxies/KIC1872517/figuresfigures/ACF.png)
+![Example of ACF method](KIC1872517/figures/ACF.png)
 Example of Coefficients of Variation method
-![Example of CoV method](numax_proxies/KIC1872517/figuresfigures/CoVs.png)
+![Example of CoV method](KIC1872517/figures/CoVs.png)
