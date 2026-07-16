@@ -7,25 +7,129 @@ from scipy.optimize import curve_fit
 from scipy.optimize import OptimizeWarning
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
+import pickle
+from scipy.signal import savgol_filter
+from scipy.interpolate import RegularGridInterpolator as RGI
 
-def evaluate_faps(n_bins):
-    """
-    Evaluates the False Alarm Probability (FAP) at 0.1% level based on the simulation
-    results published by Bell et al. (2019)
+
+# def evaluate_faps(n_bins):
+#     """
+#     Evaluates the False Alarm Probability (FAP) at 0.1% level based on the simulation
+#     results published by Bell et al. (2019)
     
-    Input:
-        n_bins :: the number of bins corresponding to the evaluation of a given CoV value
-        for which the FAP is required.
-    """
-    fap_array = np.array([1.830,1.942,1.865,1.664,1.486,1.341,1.227,1.157,1.108,1.0]) 
-    n_bins_array = np.array([4,8,16,32,64,128,256,512,1024,8196])
-    fap = interp1d(n_bins_array,fap_array,fill_value='extrapolate',bounds_error=False)(n_bins)
+#     Input:
+#         n_bins :: the number of bins corresponding to the evaluation of a given CoV value
+#         for which the FAP is required.
+#     """
+#     fap_array = np.array([1.830,1.942,1.865,1.664,1.486,1.341,1.227,1.157,1.108,1.0]) 
+#     n_bins_array = np.array([4,8,16,32,64,128,256,512,1024,8196])
+#     fap = interp1d(n_bins_array,fap_array,fill_value='extrapolate',bounds_error=False)(n_bins)
 
-    exceed_tmp = np.where(n_bins > 1024)[0]
-    if len(exceed_tmp) > 0:
-        fap[exceed_tmp] = interp1d(n_bins_array,fap_array,'linear',fill_value='extrapolate',bounds_error=False)(n_bins[exceed_tmp])
+#     exceed_tmp = np.where(n_bins > 1024)[0]
+#     if len(exceed_tmp) > 0:
+#         fap[exceed_tmp] = interp1d(n_bins_array,fap_array,'linear',fill_value='extrapolate',bounds_error=False)(n_bins[exceed_tmp])
 
-    return fap
+#     return fap
+
+def resample_FAP_values(bin_centers, database):
+    resampled_database = {}
+    for key, d in database.items():
+
+        wl = len(d['bin_centers']) // 3
+        if wl % 2 == 0:
+            wl += 1
+
+        FAP95p0 = interp1d(
+            d['bin_centers'],
+            savgol_filter(d['FAP_95p0'], window_length=wl, polyorder=2),
+            kind='cubic',
+            bounds_error=False,
+            fill_value=savgol_filter(d['FAP_95p0'], window_length=wl, polyorder=2)[-1]
+        )
+
+        FAP99p0 = interp1d(
+            d['bin_centers'],
+            savgol_filter(d['FAP_99p0'], window_length=wl, polyorder=2),
+            kind='linear',
+            bounds_error=False,
+            fill_value=savgol_filter(d['FAP_99p0'], window_length=wl, polyorder=2)[-1]
+        )
+
+        FAP99p9 = interp1d(
+            d['bin_centers'],
+            savgol_filter(d['FAP_99p9'], window_length=wl, polyorder=2),
+            kind='linear',
+            bounds_error=False,
+            fill_value=savgol_filter(d['FAP_99p9'], window_length=wl, polyorder=2)[-1]
+        )
+
+        resampled_database[key] = {
+            "bin_centers": bin_centers,
+            "FAP_95p0": FAP95p0(bin_centers),
+            "FAP_99p0": FAP99p0(bin_centers),
+            "FAP_99p9": FAP99p9(bin_centers),
+        }
+    
+    return resampled_database
+
+def grid_interpolator(resampled_database, FAP_threshold):
+    dims = [
+        sorted({k[i] for k in resampled_database})
+        for i in range(4)
+    ]
+
+    lengths, cadences, overlap_factors, windowsize_factors = dims
+
+    N = len(next(iter(resampled_database.values()))["bin_centers"])
+
+    values95 = np.full(tuple(len(d) for d in dims) + (N,), np.nan)
+
+    for i, L in enumerate(lengths):
+        for j, C in enumerate(cadences):
+            for k, O in enumerate(overlap_factors):
+                for l, W in enumerate(windowsize_factors):
+
+                    key = (L, C, O, W)
+
+                    if key in resampled_database:
+                        values95[i, j, k, l] = (
+                            resampled_database[key][f"FAP_{FAP_threshold}"]
+                        )
+
+    interp = RGI(
+        (lengths,
+        cadences,
+        overlap_factors,
+        windowsize_factors),
+        values95,
+        bounds_error=False,
+        fill_value=np.nan
+    )
+    
+    return interp
+
+def evaluate_faps(
+        bin_centers, 
+        length, 
+        cadence, 
+        overlap_factor,
+        window_size_factor,
+        FAP_threshold : str
+    ):
+
+    # Load FAP values based on realizations of white noise
+    file = 'numax_proxies/proxies/CoV/FAPs.pkl'
+    with open(file, "rb") as f:
+        database = pickle.load(f)
+
+    # Resample FAP database to common bin centers
+    resampled_database = resample_FAP_values(bin_centers, database)
+
+    # Create Scipy ReguarGridInterpolator object
+    interpolator = grid_interpolator(resampled_database, FAP_threshold)
+
+    # Return FAP values
+    return interpolator((length, cadence, overlap_factor, window_size_factor))
 
 def calculate_CoV(center, width, frequency, power):
     """
@@ -130,10 +234,9 @@ def bin_spectrum(frequency=None, power=None, overlap_factor=6, min_freq=1.0):
     bin_sizes = bin_sizes[good_indices]
     bin_centers = np.asarray(bin_centers)
     bin_centers = bin_centers[good_indices]
-    faps_CoV = evaluate_faps(bin_sizes)
 
     # Return bin_centers (frequencies) and associated CoV values and bin sizes
-    return bin_centers, CoVs, faps_CoV
+    return bin_centers, CoVs
 
 
 def smooth_CoV_values(bin_centers, CoVs):

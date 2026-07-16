@@ -68,12 +68,32 @@ class NumaxFromCoefficientsOfVariation:
             Compute numax using method of Bell et al. (2019).
             Note! should not be used together with compute() function.
         """
-        self.bin_centers, self.CoVs, self.faps_CoV = Bell.bin_spectrum(
+
+        self.bin_centers, self.CoVs = Bell.bin_spectrum(
             frequency=self.frequency,
             power=self.power,
             overlap_factor=self.cov_config.overlap_factor,
-            min_freq=self.cov_config.min_freq
+            min_freq=self.cov_config.min_freq,
         )
+        # print(np.mean(np.diff(self.frequency)))
+        # print((24 * 60 * 60 * np.mean(np.diff(self.frequency))/1e6) ** (-1))
+        # print(1/(2*np.max(self.frequency/1e6)))
+        self.faps_CoV = Bell.evaluate_faps(
+            bin_centers=self.bin_centers,
+            length=np.max(
+                [np.min([5e-1 * (24 * 60 * 60 * np.mean(np.diff(self.frequency))/1e6) ** (-1), 1461]),
+                27]
+            ),
+            overlap_factor=self.cov_config.overlap_factor,
+            window_size_factor=self.cov_config.window_size_factor,
+            cadence=np.max(
+                [np.min([1/(2*np.max(self.frequency/1e6)), 1800]),
+                20]
+            ),
+            FAP_threshold=self.cov_config.FAP_threshold
+        )
+        # print(self.faps_CoV)
+
         self.smoothed_CoVs = Bell.smooth_CoV_values(
             self.bin_centers, self.CoVs
         )
@@ -141,12 +161,21 @@ class NumaxFromCoefficientsOfVariation:
             os.mkdir(savepath)
 
         # Save CoV info
-        np.savetxt(
-            fname = f'{savepath}/{self.id}_CoV.txt',
-            X = np.column_stack((self.bin_centers, self.CoVs, self.smoothed_CoVs, self.faps_CoV)),
-            header = 'bin_centers,CoVs,smoothed_CoVs,FAPs',
-            delimiter = ','
-        )
+        if self.cov_config.use_Bell:
+            np.savetxt(
+                fname = f'{savepath}/{self.id}_CoV_with_FAP.txt',
+                X = np.column_stack((self.bin_centers, self.CoVs, self.smoothed_CoVs, self.faps_CoV)),
+                header = 'bin_centers,CoVs,smoothed_CoVs,FAPs',
+                delimiter = ','
+            )
+        else:
+            np.savetxt(
+                fname = f'{savepath}/{self.id}_CoV.txt',
+                X = np.column_stack((self.bin_centers, self.CoVs, self.smoothed_CoVs)),
+                header = 'bin_centers,CoVs,smoothed_CoVs',
+                delimiter = ','
+            )
+
 
         # Save fitting parameters
         if self.succesful_fit:

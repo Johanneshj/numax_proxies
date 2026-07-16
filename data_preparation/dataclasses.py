@@ -81,12 +81,14 @@ class COVConfig:
     """CoV configuration"""
     plot                        :   Optional[str] = False
     overlap_factor              :   Optional[float] = None
+    window_size_factor          :   Optional[float] = None
     min_freq                    :   Optional[float] = None
     smoothing_width_factor      :   Optional[float] = None
     use_welch                   :   Optional[str] = False
     welch_seg_size              :   Optional[float] = None
     use_linear_bins             :   Optional[bool] = False  
     use_Bell                    :   Optional[bool] = False 
+    FAP_threshold               :   Optional[str] = '95p0' 
     save_info                   :   Optional[str] = False
 
 @dataclass

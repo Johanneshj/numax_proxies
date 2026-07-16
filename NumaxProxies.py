@@ -287,7 +287,21 @@ class NumaxProxies:
         if filename.endswith('.csv'):
             data = np.genfromtxt(
                 filename, delimiter=",", names=["frequency", "power"]
+                )
+            
+        elif filename.endswith('.txt'):
+            data = np.genfromtxt(
+                filename,
+                dtype=float
+                )
+            mask = (
+                ~np.isnan(data[:, 0])
+                & ~np.isnan(data[:, 1])
             )
+            frequency = data[:, 0][mask]
+            psd = data[:, 1][mask]
+            return frequency, psd
+        
         elif filename.endswith('feather') or filename.endswith('.ftr'):
             data = feather.read_feather(filename)
         
@@ -296,6 +310,7 @@ class NumaxProxies:
                 & ~np.isnan(data["power"])
             )
         data = data[mask]
+        
         return data['frequency'], data['power']
 
     @classmethod
@@ -320,13 +335,15 @@ class NumaxProxies:
         self._query_gaia()
 
         if self.psd_input.psd_file:
+            f, p = self._load_psd(self.psd_input.psd_file)
             self.psd = PSDData(
-                self._load_psd(self.psd_input.psd_file)
+                f, p
             )
 
         if self.psd_input.avg_psd_file:
+            f, p = self._load_psd(self.psd_input.avg_psd_file)
             self.avg_psd = AvgPSDData(
-                self._load_psd(self.psd_input.avg_psd_file)
+                f, p
             )
         else:
             self._load_lightcurve()

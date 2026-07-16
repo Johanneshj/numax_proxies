@@ -113,6 +113,7 @@ def plot_CoV_Bell(
     ax.plot(bin_centers, faps_CoV, c='green', ls=':', label='FAP')
     
     ax.text(0.98, 0.02, f"{id}", ha="right", va="bottom", transform=ax.transAxes)
+    ax.text(0.98, 0.98, f"{id}", ha="right", va="top", transform=ax.transAxes)
     ax.set_xscale("log")
     ax.set_xlabel("frequency [μHz]")
     ax.set_ylabel("coefficient of variation")

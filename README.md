@@ -46,7 +46,6 @@ proxy.plotting()
 # Get results
 res = proxy.results
 ```
-
 ---
 ## Example Results
 Example of full spectrum with all numax estimates
