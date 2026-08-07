@@ -2,6 +2,7 @@ import numpy as np
 from matplotlib.colors import LogNorm
 import numpy as np
 from numpy.typing import NDArray
+from ...data_preparation.dataclasses import ACFConfig
 
 
 def plot_spec(frequency : NDArray, power : NDArray, smoothed_power : NDArray, ax : NDArray, id : str):
@@ -14,27 +15,32 @@ def plot_spec(frequency : NDArray, power : NDArray, smoothed_power : NDArray, ax
     ax.text(0.02, 0.02, f"{id}", ha="left", va="bottom", transform=ax.transAxes)
     ax.legend()
 
-def plot_collapsed_acf_with_gaussian_fit(collapsed_2D_acf : NDArray, unsmoothed_acf : NDArray, 
-                                         freq_centers : NDArray, fit_vals : NDArray, initial_numax : float, ax : NDArray):
+def plot_collapsed_acf_with_gaussian_fit(
+        collapsed_2D_acf : list[NDArray], 
+        unsmoothed_acf : list[NDArray], 
+        freq_centers : list[NDArray], 
+        global_fit_vals : list[list], 
+        initial_numax : float, 
+        ax : NDArray,
+        acf_config : ACFConfig
+):
     """Plot collapsed ACF from log-sliding window with Gaussian fit"""
-    def gaussian(x, A, sigma, mu):
-        return A * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
-    
-    def gauss_plus_exponential(x, A, sigma, mu, a, b):
-        return A * np.exp(-((x - mu) ** 2) / (2 * sigma**2)) + a * np.exp(-b*x)
+    def gaussian(x, A, sigma, mu, y):
+        return y + A * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
+    for bcs, u, s, fit_vals in zip(freq_centers, unsmoothed_acf, collapsed_2D_acf, global_fit_vals):
+        ax.plot(bcs, u, c='gray', alpha=0.4, zorder=-3)
+        ax.plot(bcs, s, c='k', alpha=0.4, zorder=-2)
+        x = np.linspace(np.min(bcs), np.max(bcs), len(bcs)*10)
+        ax.plot(x, gaussian(x, fit_vals["amp"], fit_vals["sigma"], fit_vals["numax"], fit_vals["y"]), c="r", alpha=0.4, zorder=-1)
+        ax.axvline(fit_vals["numax"], c="b", ls="--", alpha=0.3, zorder=0)
 
-    # freq_centers = np.log10(freq_centers)
-    x = np.linspace(np.min(freq_centers), np.max(freq_centers), len(freq_centers)*10)
-    ax.set_xscale('log')
-    ax.plot(freq_centers, unsmoothed_acf, c='gray', marker='^', label='unsmoothed ACF')
-    ax.plot(freq_centers, collapsed_2D_acf, c="k", marker=".", label="collapsed 2D ACF")
-    ax.plot(x, gaussian(x, *fit_vals), c="r", label="Gaussian fit")
+    if acf_config.plot_log_scale:
+        ax.set_xscale('log')
+
     if initial_numax:
         ax.axvline(initial_numax, c='green', ls='-.', label='initial guess')
-    ax.axvline(
-        fit_vals[2], c="b", ls="--", label=f"numax = {np.round(fit_vals[2],2)}"
-    )
+    
     ax.set_xlabel("frequency [μHz]")
-    ax.set_ylabel("A.U.")
+    ax.set_ylabel("norm. CACF strength")
     
     ax.legend()

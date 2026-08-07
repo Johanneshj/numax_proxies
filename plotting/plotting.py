@@ -10,33 +10,44 @@ def plot_spectrum_with_all_numax_estimates(psd : PSDData, star : StarInfo, numax
         try:
             numax_val = numax.n
             numax_err = numax.s
-            line_label = rf"{label}: {numax_val:.1f} ± {numax_err:.1f}"
+            val = rf"{numax_val:.1f} ± {numax_err:.1f}"
         except:
             numax_val = numax
             numax_err = None
-            line_label = f"{label}: {numax_val:.1f}"
+            val = f"{numax_val:.1f}"
 
         if "CoV" in label:
             ls = (0, (3, 1, 1, 1))
             c = "mediumorchid"
+            line_label = r"$\nu_\text{max}^\text{CoV}$: " + val
         elif "2DACF" in label:
             ls = (0, (5, 1))
             c = "forestgreen"
+            line_label = r"$\nu_\text{max}^\text{2DACF}$: " + val
         elif "SR" in label:
             ls = (0, (1, 5))
             c = "dodgerblue"
+            if "logg_teff" in label:
+                line_label = r"$\nu_\text{max}^{gT_\text{eff}^{-1/2}}$: " + val
+            else:
+                line_label = r"$\nu_\text{max}^\text{SR}$: " + val
+            # More to be added here
         elif "FliPer" in label:
             ls = (5, (10, 3))
             c = "darkorange"
+            line_label = r"$\nu_\text{max}^\text{FliPer}$: " + val
 
         ax.axvline(numax_val, linestyle=ls, c=c, label=line_label)
         if numax_err is not None:
             ax.axvspan(numax_val - numax_err, numax_val + numax_err, alpha=0.2, color=c)
+
     ax.set_xlabel("Frequency")
     ax.set_ylabel("Power")
+
     ax.set_xlim(np.min(psd.frequency), np.max(psd.frequency))
-    ax.text(0.02, 0.02, f"{star.target}", ha="left", va="bottom", transform=ax.transAxes)
-    ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+    ax.legend(loc="lower left", title=f"{star.target} " + r"$\nu_\text{max} \ [\mu\text{Hz}]$")
+    
     savepath = os.path.join("numax_proxies", "results", f'{star.target}', "figures")
     os.makedirs(savepath, exist_ok=True)
     fig.savefig(

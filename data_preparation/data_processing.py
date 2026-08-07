@@ -6,8 +6,12 @@ import pandas as pd
 import time as t
 import os
 from scipy.signal import savgol_filter, welch
+from scipy.signal.windows import hann
 from .dataclasses import LightCurveData, ProcessingConfig, COVConfig
 from typing import Optional, Literal
+from numpy.lib.stride_tricks import sliding_window_view as slw
+import nifty_ls
+import matplotlib.pyplot as plt
 
 class DataProcessing:
     def __init__(
@@ -120,76 +124,161 @@ class DataProcessing:
     # ----------------------------
     # Averaged PSD (Sylvain Breton)
     # ----------------------------
-    def averaged_psd(self, chunk_len=90):
-        """
-        Author: Sylvain Breton
-        email: sylvain.breton@inaf.it
-        Created: 22 Nov 2024
-        INAF-OACT
+    # def averaged_psd(self, chunk_len=90):
+    #     """
+    #     Author: Sylvain Breton
+    #     email: sylvain.breton@inaf.it
+    #     Created: 22 Nov 2024
+    #     INAF-OACT
 
-        Compute mean PSD of a light curve, by subdividing it
-        into chunks of equal length. The light curve sampling
-        is assumed to be regular.
+    #     Compute mean PSD of a light curve, by subdividing it
+    #     into chunks of equal length. The light curve sampling
+    #     is assumed to be regular.
 
-        Parameters
-        ----------
-        param time: ndarray
-        Input time vector in days
+    #     Parameters
+    #     ----------
+    #     param time: ndarray
+    #     Input time vector in days
 
-        param flux: ndarray
-        Input flux of the light curve in ppm
+    #     param flux: ndarray
+    #     Input flux of the light curve in ppm
 
-        param len_chunk: float
-        Length of the chunks in days.
-        Optional, default 90
+    #     param len_chunk: float
+    #     Length of the chunks in days.
+    #     Optional, default 90
 
-        Returns
-        -------
-        tuple of arrays
-        A tuple with frequency and power spectral density
-        vectors.
-        """
-        time = self.time
-        flux = self.flux
-        flux_err = self.flux_err
+    #     Returns
+    #     -------
+    #     tuple of arrays
+    #     A tuple with frequency and power spectral density
+    #     vectors.
+    #     """
+    #     time = self.time
+    #     flux = self.flux
+    #     flux_err = self.flux_err
 
-        dt = np.median(np.diff(time))
-        dt_sec = dt * 86400.0
-        df = 1 / (np.max(time)*86400.0)
-        len_chunk = chunk_len
-        if len_chunk >= np.max(time) / 2:
-            raise ValueError('chunk length for averaged PSD too long. Should be atleast 1/2 length of time series.')
-        size_chunk = int(len_chunk / dt)
-        n_chunk = len(time) // size_chunk
+    #     dt = np.median(np.diff(time))
+    #     dt_sec = dt * 86400.0
+    #     df = 1 / (np.max(time)*86400.0)
+    #     len_chunk = chunk_len
+    #     if len_chunk >= np.max(time) / 2:
+    #         raise ValueError('chunk length for averaged PSD too long. Should be atleast 1/2 length of time series.')
+    #     size_chunk = int(len_chunk / dt)
+    #     n_chunk = len(time) // size_chunk
 
-        time = (
-            time[: size_chunk * n_chunk].reshape((n_chunk, size_chunk)) * 86400
-        )  # convert back to seconds
-        flux = flux[: size_chunk * n_chunk].reshape((n_chunk, size_chunk))
-        flux_err = flux_err[: size_chunk * n_chunk].reshape((n_chunk, size_chunk))
+    #     time = (
+    #         time[: size_chunk * n_chunk].reshape((n_chunk, size_chunk)) * 86400
+    #     )  # convert back to seconds
+    #     flux = flux[: size_chunk * n_chunk].reshape((n_chunk, size_chunk))
+    #     flux_err = flux_err[: size_chunk * n_chunk].reshape((n_chunk, size_chunk))
 
-        # Common frequency grid in Hz
-        freq_grid = np.arange(df / self.cfg.oversampling, 1/(2*dt_sec), df / self.cfg.oversampling)
-        # print(self.cfg.oversampling * df, 1/(2*dt_sec))
-        # freq, psd = self.calculate_psd_for_avg_psd(
-        #     time[0], flux[0], flux_err[0], freq_grid=None
-        # )
+    #     # Common frequency grid in Hz
+    #     freq_grid = np.arange(df / self.cfg.oversampling, 1/(2*dt_sec), df / self.cfg.oversampling)
+    #     # print(self.cfg.oversampling * df, 1/(2*dt_sec))
+    #     # freq, psd = self.calculate_psd_for_avg_psd(
+    #     #     time[0], flux[0], flux_err[0], freq_grid=None
+    #     # )
 
-        # PSD for each segment on common frequency grid
-        psd = [
-            self.calculate_psd_for_avg_psd(t_chunk, f_chunk, ferr_chunk, freq_grid=freq_grid)
-            for t_chunk, f_chunk, ferr_chunk in zip(time, flux, flux_err)
-        ]
-        psd = sum(psd)
+    #     # PSD for each segment on common frequency grid
+    #     psd = [
+    #         self.calculate_psd_for_avg_psd(t_chunk, f_chunk, ferr_chunk, freq_grid=freq_grid)
+    #         for t_chunk, f_chunk, ferr_chunk in zip(time, flux, flux_err)
+    #     ]
+    #     # psd = sum(psd)
 
-        psd /= n_chunk
+    #     # psd /= n_chunk
+    #     psd_matrix = np.array(psd)  
+    #     psd = np.median(psd_matrix, axis=0, ddof=1)
 
-        self.avgpsd_freq = freq_grid * 1e6  # convert to microHz
-        self.avgpsd_power = psd
-        return self
+    #     self.avgpsd_freq = freq_grid * 1e6  # convert to microHz
+    #     self.avgpsd_power = psd
+    #     return self
+
+    def averaged_psd(self, chunk_len=90, overlap=0.0):
+            """
+            Author: Sylvain Breton
+            email: sylvain.breton@inaf.it
+            Created: 22 Nov 2024
+            INAF-OACT
+    
+            Compute mean PSD of a light curve, by subdividing it
+            into chunks of equal length. The light curve sampling
+            is assumed to be regular.
+    
+            Parameters
+            ----------
+            param time: ndarray
+            Input time vector in days
+    
+            param flux: ndarray
+            Input flux of the light curve in ppm
+    
+            param len_chunk: float
+            Length of the chunks in days.
+            Optional, default 90
+    
+            Returns
+            -------
+            tuple of arrays
+            A tuple with frequency and power spectral density
+            vectors.
+            """
+            
+            time = self.time.astype(np.float64)
+            flux = self.flux.astype(np.float64)
+            flux_err = self.flux_err.astype(np.float64)
+
+            dt = np.median(np.diff(time))
+            len_chunk = chunk_len
+            while len_chunk >= np.max(time) / 2:
+                len_chunk -= 1
+            # if len_chunk >= np.max(time) / 2:
+            #     raise ValueError('chunk length for averaged PSD too long. Should be atleast 1/2 length of time series.')
+            size_chunk = int(len_chunk / dt)          
+
+            # Generate overlapping chunks using sliding window view
+            chunk_overlap = int(overlap * size_chunk)
+            step = size_chunk - chunk_overlap
+
+            time = slw(time * 86400, window_shape=size_chunk, writeable=True)[::step]
+            flux = slw(flux, window_shape=size_chunk, writeable=True)[::step]
+            hann_window = hann(size_chunk, sym=True)
+            flux_err = slw(flux_err, window_shape=size_chunk, writeable=True)[::step]
+    
+            # Define common frequency grid in Hz based on chunk length and oversampling         
+            dt = np.median(np.diff(time))
+            df = 1 / np.max(time[0, :])
+            freq_grid = np.arange(df / self.cfg.oversampling, 1/(2*dt), df / self.cfg.oversampling, dtype=np.float64)       
+
+            # Compute lombscargle for each chunk using nifty_ls
+            start = t.time()
+            n_chunks = time.shape[0]
+            n_freqs = len(freq_grid)
+            psd_matrix = nifty_ls.lombscargle_heterobatch(
+                t_list=list(time),
+                y_list=list(flux * hann_window), # APPLY HANNING WINDOW
+                dy_list=list(flux_err),
+                normalization='psd',
+                fmin_list=np.full(n_chunks, freq_grid[0], dtype=np.float64),
+                fmax_list=np.full(n_chunks, freq_grid[-1], dtype=np.float64),
+                Nf_list=np.full(n_chunks, n_freqs, dtype=int),
+                nthreads=8
+            )
+            end = t.time()
+            print(f'nifty windows time: {np.round(end-start, 2)} seconds')
+
+            # Compute median PSD; median is more robust than mean for outliers
+            psd_matrix = psd_matrix.power_list
+            psd = np.median(psd_matrix, axis=0)
+
+            # Return to muHz
+            self.avgpsd_freq = freq_grid * 1e6
+            self.avgpsd_power = psd
+            return self
 
     def calculate_psd_for_avg_psd(self, time, flux, flux_err, freq_grid=None):
         """Calculate freq and power to later sum up for averaged psd"""
+        flux *= hann(len(flux), sym=True)
         ls = LombScargle(t=time, y=flux, dy=flux_err, fit_mean=False, center_data=True)
 
         if freq_grid is None:
@@ -213,23 +302,26 @@ class DataProcessing:
     def calculate_welch_spectrum(self):
         """Calculate Welch spectrum"""
         x = np.asarray(self.flux)
-        fs = 1 / np.mean(np.diff(self.time))
-        plt.figure()
-        plt.plot(self.time, self.flux)
+
+        dt_days = np.mean(np.diff(self.time))
+        dt_seconds = dt_days * 24 * 60 * 60
+
+        fs_uHz = 1e6 / dt_seconds
         
-        seg_size = int(self.cov_config.welch_seg_size / np.mean(np.diff(self.time)))
+        seg_size = int(self.cov_config.welch_seg_size / dt_days)
         start = t.time()
-        self.welch_f, self.welch_p = welch(x=x, fs=fs, 
-                                        scaling='density', window='hann',
-                                        nperseg=seg_size,
-                                        average='median',
-                                        noverlap=int(0.9 * seg_size)
-                                    )
+        self.welch_f, self.welch_p = welch(
+            x=x, 
+            fs=fs_uHz, 
+            scaling='density', 
+            window='hann',
+            nperseg=seg_size,
+            average='median',
+            noverlap=int(0.9 * seg_size)
+        )
         end = t.time()
         print(f'Time to produce Welch spectrum: {np.round(end-start, 3)} seconds')
-        self.welch_f *= 1e6 / 86400.0
-        plt.figure()
-        plt.loglog(self.welch_f, self.welch_p)
+        # self.welch_f *= 1e6 / 86400.0
         return self
 
 

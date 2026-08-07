@@ -7,7 +7,7 @@ Import from all subfolders everything we'll need
 # __all__ = [*ACF.__all__, *ScalingRelations.__all__, *CoV.__all__, *FliPer.__all__]
 
 from .numax_from_ACF import NumaxFromACF
-from .numax_from_coefficients_of_variation import NumaxFromCoefficientsOfVariation
+from .numax_from_CoV import NumaxFromCoefficientsOfVariation
 from .numax_from_FliPer import NumaxFromFliPer
 from .numax_from_scaling_relations import NumaxFromScalingRelations
 from .numax_from_EACF import NumaxFromEACF

@@ -53,12 +53,14 @@ class ProcessingConfig:
     save_psd            :   bool = False
     save_avgpsd         :   bool = False
     save_results        :   bool = False
+    results_directory   :   Optional[bool] = "numax_proxies/results"
 
     oversampling    :   float = 1.0
     width_for_wf    :   Optional[float] = None
     noise_std       :   float = 0.0
     savgol_window   :   float = 90.0
     avg_psd_chunk   :   float = 90.0
+    avg_psd_overlap :   float = 0.0
     initial_numax   :   Optional[float] = None
     gap_size_days   :   float = 3.0
 
@@ -66,30 +68,35 @@ class ProcessingConfig:
 class ACFConfig:
     """ACF configuration"""
     plot                    :   Optional[str] = False
+    plot_log_scale          :   Optional[str] = False
     sliding_window_style    :   Literal["linear", "logarithmic", "log_numax"] = "log_numax"
     min_freq                :   Optional[float] = None
     max_freq                :   Optional[float] = None
-    min_num_points          :   Optional[int] = None
-    overlap_scale           :   Optional[float] = None
-    width_factor            :   Optional[float] = None
+    overlap_scale           :   Optional[list[float]] = None
+    width_factor            :   Optional[list[float]] = None
+    smoothing_factor        :   Optional[list[float]] = None
     max_acf_fit_iterations  :   int = 1
     n_sigma_numax_acf       :   float = 2 
     save_info               :   Optional[str] = False
+    save_results            :   Optional[str] = False
 
 @dataclass
 class COVConfig:
     """CoV configuration"""
     plot                        :   Optional[str] = False
-    overlap_factor              :   Optional[float] = None
-    window_size_factor          :   Optional[float] = None
+    plot_log_scale          :   Optional[str] = False
     min_freq                    :   Optional[float] = None
-    smoothing_width_factor      :   Optional[float] = None
+    max_freq                    :   Optional[float] = None
+    overlap_scale               :   Optional[list[float]] = None
+    width_factor                :   Optional[list[float]] = None
+    smoothing_factor            :   Optional[list[float]] = None
     use_welch                   :   Optional[str] = False
     welch_seg_size              :   Optional[float] = None
     use_linear_bins             :   Optional[bool] = False  
     use_Bell                    :   Optional[bool] = False 
     FAP_threshold               :   Optional[str] = '95p0' 
     save_info                   :   Optional[str] = False
+    save_results                :   Optional[str] = False
 
 @dataclass
 class EACFConfig:
@@ -117,9 +124,11 @@ class UnprocessedLightCurveData:
 @dataclass
 class LightCurveData:
     """Data class containing light curve data"""
-    time        :   NDArray[np.float64]
-    flux        :   NDArray[np.float64]
-    flux_err    :   NDArray[np.float64]
+    time            :   NDArray[np.float64]
+    flux            :   NDArray[np.float64]
+    flux_err        :   NDArray[np.float64]
+    length_days     :   Optional[float] = None
+    cadence_secs    :   Optional[float] = None
 
 @dataclass 
 class PSDData:

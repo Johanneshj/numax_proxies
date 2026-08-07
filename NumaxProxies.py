@@ -11,6 +11,7 @@ import pandas as pd
 import yaml
 import pyarrow.feather as feather
 import time as t
+import matplotlib.pyplot as plt
 
 # Internal imports
 from .data_preparation import GetLightcurve, DataProcessing, read_json_file
@@ -57,7 +58,10 @@ class NumaxProxies:
             acf_proxy.plot()
 
         if self.acf_config.save_info:
-            acf_proxy.save_to_txt()
+            acf_proxy.save_all_data()
+
+        if self.acf_config.save_results:
+            acf_proxy.save_numax_estimates()
 
         self.numax_estimates["numax_2DACF"] = numax
 
@@ -82,6 +86,8 @@ class NumaxProxies:
             config=self.config,
             cov_config = self.cov_config,
             id=self.star.target,
+            length_timeseries=self.lc.length_days,
+            cadence_timeseries=self.lc.cadence_secs,
             initial_numax=self.config.initial_numax
         )
         # use formalism of Bell+ (2019)?
@@ -97,7 +103,10 @@ class NumaxProxies:
                 CoV_proxy.plot()
         
         if self.cov_config.save_info:
-            CoV_proxy.save_to_txt()
+            CoV_proxy.save_all_data()
+
+        if self.cov_config.save_results:
+            CoV_proxy.save_numax_estimates()
 
         self.numax_estimates["numax_CoV"] = numax
 
@@ -123,7 +132,7 @@ class NumaxProxies:
         """Compute numax with method from Mosser & Appourchaux (2009) and I.W. Roxburgh (2009)"""
         EACF_proxy = NumaxFromEACF(
             star = self.star,
-            psd = self.psd,
+            psd = self.avg_psd,
             config = self.config,
             eacf_config = self.eacf_config
         )
@@ -233,7 +242,9 @@ class NumaxProxies:
         self.lc = LightCurveData(
             time = time,
             flux = flux,
-            flux_err = flux_err
+            flux_err = flux_err,
+            length_days = time[-1] - time[0],
+            cadence_secs = 86400 * np.median(np.diff(time))
         )
 
         # PSD (potentially change DataProcessing to output dataclasses rather than tuples)
@@ -246,21 +257,21 @@ class NumaxProxies:
         # Averaged PSD
         if self.config.do_avg_psd:
             chunk_length = self.config.avg_psd_chunk
-            dp.averaged_psd(chunk_len=chunk_length)
+            dp.averaged_psd(chunk_len=chunk_length, overlap=self.config.avg_psd_overlap)
             avg_psd_freq, avg_psd_power = dp.avg_psd
             self.avg_psd = AvgPSDData(
                 frequency = avg_psd_freq,
                 psd = avg_psd_power
             )
-        
+
         # Welch PSD
         if self.cov_config.use_welch:
             welch_freq, welch_psd = dp.calculate_welch_spectrum().welch_psd
             self.welch_psd = AvgPSDData(
                 frequency = welch_freq,
                 psd = welch_psd
-            )            
-
+            )      
+        
         # Plot lc and pg
         if self.config.plot_lc:
             dp.plot_lc_and_pg()

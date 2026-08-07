@@ -2,7 +2,7 @@
 from ..data_preparation.dataclasses import PSDData, ProcessingConfig, EACFConfig, StarInfo
 from typing import Optional, Literal
 from .EACF.eacf_plot import plot
-from .EACF.calculate_envelope import calculate_envelope
+from .EACF.calculate_envelope import calculate_envelope, get_bin_centers, two_dim_ACF
 import matplotlib.pyplot as plt
 import os
 
@@ -27,7 +27,9 @@ class NumaxFromEACF:
         """
             Compute numax from EACF method.
         """
-        self.envelope = calculate_envelope(self.frequency, self.power)
+        # self.envelope = calculate_envelope(self.frequency, self.power)
+        two_dim_ACF(self.frequency,
+                    self.power)
         return self
 
     @property
@@ -47,4 +49,4 @@ class NumaxFromEACF:
         )
         savepath = os.path.join("numax_proxies", "results", self.star.target, "figures")
         os.makedirs(savepath, exist_ok=True)
-        fig.savefig(f"{savepath}/CoVs_Bell.png", dpi=300, bbox_inches="tight")
+        # fig.savefig(f"{savepath}/CoVs_Bell.png", dpi=300, bbox_inches="tight")

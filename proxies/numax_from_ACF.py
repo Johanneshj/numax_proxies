@@ -2,19 +2,21 @@ from .ACF import (
     calculate_relative_power,
     calculate_two_dim_ACF,
     collapsed_acf,
-    fit_gauss_to_collapsed_acf,
+    fit_gauss_global,
     plot_spec,
     plot_collapsed_acf_with_gaussian_fit,
-    plot_spec_linear,
-    plot_collapsed_acf_with_gaussian_fit_linear,
-    plot_2D_ACF_linear
 )
+import json
 import os
+from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typing import Optional, Literal
 from ..data_preparation.dataclasses import AvgPSDData, ACFConfig, ProcessingConfig
-
+import gzip
+import pickle
+import pandas as pd
+from uncertainties import ufloat
 
 class NumaxFromACF:
     def __init__(
@@ -31,7 +33,6 @@ class NumaxFromACF:
         self.frequency = avg_psd.frequency
         self.avg_psd = avg_psd.psd
         
-
         # ACF configuration parameters and global config (only needed for noise_std)
         self.acf_config = acf_config
         self.config = config
@@ -47,107 +48,123 @@ class NumaxFromACF:
             self.frequency, self.avg_psd
         )
         # Calculate 2D ACF
-        self.twodim_ACF, self.freq_windows = calculate_two_dim_ACF(
+        self.bin_centers, self.freq_windows, self.acfs = calculate_two_dim_ACF(
             frequency   = self.frequency, 
             power       = self.normalized_power,
             acf_config  = self.acf_config
         )
-        # Collapse 2D ACF and smooth
-        self.smoothed_acf, self.unsmoothed_acf, self.freq_centers = collapsed_acf(
-            acf                     = self.twodim_ACF, 
-            freq_windows            = self.freq_windows, 
-            sliding_window_style    = self.acf_config.sliding_window_style
+        # Collapse 2D ACF and smooth and generate flattened bin_centers
+        self.bin_centers, self.unsmoothed_cacfs, self.smoothed_cacfs = collapsed_acf(
+            bin_centers     = self.bin_centers,  
+            acfs            = self.acfs,
+            acf_config      = self.acf_config
         )
         # Fit gauss to estimate numax
-        self.numax, self.fit_vals = fit_gauss_to_collapsed_acf(
-            smoothed_acf            = self.smoothed_acf, 
-            freq_centers            = self.freq_centers, 
+        self.results, self.fit_vals = fit_gauss_global(
+            bin_centers             = self.bin_centers, 
+            smoothed_cacfs          = self.smoothed_cacfs, 
             initial_numax           = self.initial_numax,
             max_acf_fit_iterations  = self.acf_config.max_acf_fit_iterations,
-            n_sigma_numax_acf       = self.acf_config.n_sigma_numax_acf
+            n_sigma_numax_acf       = self.acf_config.n_sigma_numax_acf,
         )
+
         return self
 
     def plot(self):
         """Plot 2D ACF computations if specified"""
         import matplotlib.pyplot as plt
+    
+        fig, axs = plt.subplots(2, 1, figsize=(6, 8))
+        plot_spec(
+            self.frequency,
+            self.avg_psd,
+            self.med_filter,
+            ax=axs[0],
+            id=self.id,
+        )
+        plot_collapsed_acf_with_gaussian_fit(
+            self.smoothed_cacfs, self.unsmoothed_cacfs, 
+            self.bin_centers, self.fit_vals, self.initial_numax,
+            ax=axs[1], acf_config=self.acf_config
+        )
+        savepath = os.path.join(self.config.results_directory, self.id, "figures")
+        os.makedirs(savepath, exist_ok=True)
+        if self.config.noise_std > 0:
+            fig.savefig(
+                f"{savepath}/ACF_noise-{self.config.noise_std}ppm.png", dpi=300, bbox_inches="tight"
+            )
+        fig.savefig(f"{savepath}/ACF.png", dpi=300, bbox_inches="tight")
 
-        if self.acf_config.sliding_window_style == 'linear':
-            # If sliding window is linear we plot 2D ACF map
-            fig, axs = plt.subplots(3, 1, figsize=(6, 12))
-            plot_spec_linear(
-                self.frequency,
-                self.avg_psd,
-                self.med_filter,
-                ax=axs[0],
-                id=self.id,
-            )
-            plot_2D_ACF_linear(self.twodim_ACF, self.frequency, ax=axs[1])
-            plot_collapsed_acf_with_gaussian_fit_linear(
-                self.smoothed_acf, self.freq_centers, self.fit_vals, ax=axs[2]
-            )
-            savepath = os.path.join("numax_proxies", "results", self.id, "figures")
-            os.makedirs(savepath, exist_ok=True)
-            if self.config.noise_std > 0:
-                fig.savefig(
-                    f"{savepath}/ACF_noise-{self.config.noise_std}ppm.png", dpi=300, bbox_inches="tight"
-                )
-            fig.savefig(f"{savepath}/ACF.png", dpi=300, bbox_inches="tight")
-        else:
-            # If sliding window is log-something, we only draw collapsed 2D ACF
-            fig, axs = plt.subplots(2, 1, figsize=(6, 8))
-            plot_spec(
-                self.frequency,
-                self.avg_psd,
-                self.med_filter,
-                ax=axs[0],
-                id=self.id,
-            )
-            plot_collapsed_acf_with_gaussian_fit(
-                self.smoothed_acf, self.unsmoothed_acf, 
-                self.freq_centers, self.fit_vals, self.initial_numax,
-                ax=axs[1]
-            )
-            savepath = os.path.join("numax_proxies", "results", self.id, "figures")
-            os.makedirs(savepath, exist_ok=True)
-            if self.config.noise_std > 0:
-                fig.savefig(
-                    f"{savepath}/ACF_noise-{self.config.noise_std}ppm.png", dpi=300, bbox_inches="tight"
-                )
-            fig.savefig(f"{savepath}/ACF.png", dpi=300, bbox_inches="tight")
-
-    def save_to_txt(self):
+    def save_all_data(self):
         """Save ACF calculations to txt file"""
         # Save path location
-        results_dir = os.path.join("numax_proxies", "results", self.id)
-        if not os.path.exists(results_dir):
-            os.mkdir(results_dir)
+        savepath = Path(self.config.results_directory) / str(self.id) / "ACF_info"
+        savepath.mkdir(parents=True, exist_ok=True)
 
-        savepath = os.path.join("numax_proxies", "results", self.id, 'acf_info')
-        if not os.path.exists(savepath):
-            os.mkdir(savepath)
 
-        # Save acf info
-        fc = np.asarray(self.freq_centers)
-        usacf = np.asarray(self.unsmoothed_acf)
-        sacf = np.asarray(self.smoothed_acf)
+        # Flattened lists
+        bcs = self.bin_centers
+        usacfs = self.unsmoothed_cacfs
+        sacfs = self.smoothed_cacfs
+
+        nested_dict = {
+            'star'  : self.id,
+            'data'  : []
+        }
+
+        # Iterate over all bin centers, unsmoothed cacfs, and smoothed cacfs
+        # Also append fit values
+        i = 0
+        z = 0
+        for ov_scale in self.acf_config.overlap_scale:
+            for w_fac in self.acf_config.width_factor:
+
+                data_entry = {
+                    'overlap_scale'     : ov_scale,
+                    'width_factor'      : w_fac,
+                    'bin_centers'       : bcs[i],
+                    'unsmoothed_cacf'   : usacfs[i],
+                    'smoothed_cacfs'    : []
+                }
+
+
+                for smoothing_fac in self.acf_config.smoothing_factor:
+                    data_entry['smoothed_cacfs'].append({
+                        'smoothing_factor': smoothing_fac,
+                        'smoothed_cacf'   : sacfs[z],
+                        'fit_vals'        : self.fit_vals[z]
+                    })
+                    z += 1
+                i += 1
+
+            nested_dict['data'].append(data_entry)
+
+        with gzip.open(f"{savepath}/all_data.pkl.gz", "wb") as f:
+            pickle.dump(nested_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def save_numax_estimates(self):
+        """Save only numax estimates"""
+        savepath = Path(self.config.results_directory) / str(self.id) / "ACF_info"
+        savepath.mkdir(parents=True, exist_ok=True)
+
+        values = np.column_stack([
+            [x.n for x in self.results],
+            [x.s for x in self.results],
+        ])
+
         np.savetxt(
-            fname = f'{savepath}/{self.id}_2DACF.txt',
-            X = np.column_stack((fc, usacf, sacf)),
-            header = 'freq_centers,unsmoothed_acf,smoothed_acf',
-            delimiter = ','
-        )
-
-        # Save fitting parameters
-        np.savetxt(
-            fname = f'{savepath}/{self.id}_2DACF_fit_params.txt',
-            X = np.column_stack(self.fit_vals),
-            header = 'amp,sigma,numax',
-            delimiter = ','
+            fname = f"{savepath}/numax_estimates.txt",
+            X = values,
+            header = 'numax,numax_err',
+            delimiter=',',
+            fmt="%.4f"
         )
 
     @property   
     def numax_estimate(self) -> float:
-        return self.numax
+        """Return mean numax estimate"""
+        numaxes = [x.n for x in self.results]
+        errs = [x.s for x in self.results]
+        return ufloat(np.mean(numaxes), np.mean(errs))
     
 

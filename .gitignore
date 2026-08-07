@@ -13,3 +13,7 @@ results/_*
 _results/
 results/*
 FliPer_model.pkl
+proxies/EACF/
+proxies/FliPer/
+numax_from_Fliper.py
+numax_from_EACF.py

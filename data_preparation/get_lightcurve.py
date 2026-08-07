@@ -2,8 +2,8 @@ import lightkurve as lk
 import glob
 import numpy as np
 import pyarrow.feather as feather
-
-
+import pandas as pd
+import matplotlib.pyplot as plt
 
 class GetLightcurve:
     def __init__(
@@ -51,6 +51,8 @@ class GetLightcurve:
                 self.lightcurve_from_csv_file()
             elif ((self._lc_file.endswith(".feather")) or (self._lc_file.endswith(".ftr"))):
                 self.lightcurve_from_feather_file()
+            elif self._lc_file.endswith(".parquet"):
+                self.lightcurve_from_parquet_file()
             
         # Get light curve from fits files
         elif fits_files_folder is not None:
@@ -155,6 +157,14 @@ class GetLightcurve:
         self._flux = np.array(data["flux"])
         self._flux_err = np.ones_like(self._flux) * np.nanstd(self._flux)
         return mask
+
+    def lightcurve_from_parquet_file(self):
+        """Load lc from .feather file"""
+        df = pd.read_parquet(self._lc_file, engine='pyarrow')
+        self._time = np.array(df['time'])
+        self._flux = np.array(df['flux'])
+        self._flux_err = np.array(df['flux_err'])
+        return self
 
     def lightcurve_from_target_name(self):
         """Use LightKurve to grab lc from id"""
