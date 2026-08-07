@@ -15,5 +15,5 @@ results/*
 FliPer_model.pkl
 proxies/EACF/
 proxies/FliPer/
-numax_from_Fliper.py
-numax_from_EACF.py
+proxies/numax_from_Fliper.py
+proxies/numax_from_EACF.py
