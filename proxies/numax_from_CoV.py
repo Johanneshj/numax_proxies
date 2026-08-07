@@ -9,7 +9,7 @@ from .CoV import (
     # plot_CoV_Bell
 )
 from pathlib import Path
-from .CoV import Keaton_bell_alternative as Bell
+# from .CoV import Keaton_bell_alternative as Bell
 import os
 import numpy as np
 import gzip
