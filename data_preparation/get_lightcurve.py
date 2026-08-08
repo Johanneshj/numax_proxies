@@ -1,4 +1,3 @@
-import lightkurve as lk
 import glob
 import numpy as np
 import pyarrow.feather as feather
@@ -64,6 +63,7 @@ class GetLightcurve:
         
         # Get light curve from LightKurve from target name
         elif target is not None:
+            import lightkurve as lk
             self.set_lightcurve_info(
                 author=author,
                 cadence=cadence,

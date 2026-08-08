@@ -1,20 +1,20 @@
 # Python package imports
 import numpy as np
-from uncertainties import unumpy as unp
-import lightkurve as lk
-from lightkurve.periodogram import Periodogram
-from astropy import units as u
-from dataclasses import dataclass, field
-from typing import Optional, Literal
-from numpy.typing import NDArray
+# from uncertainties import unumpy as unp
+# import lightkurve as lk
+# from lightkurve.periodogram import Periodogram
+# from astropy import units as u
+# from dataclasses import dataclass, field
+# from typing import Optional, Literal
+# from numpy.typing import NDArray
 import pandas as pd
 import yaml
 import pyarrow.feather as feather
-import time as t
-import matplotlib.pyplot as plt
+# import time as t
+# import matplotlib.pyplot as plt
 
 # Internal imports
-from .data_preparation import GetLightcurve, DataProcessing, read_json_file
+from .data_preparation import GetLightcurve, DataProcessing#, read_json_file
 from .data_preparation.dataclasses import *
 from .plotting import plot_spectrum_with_all_numax_estimates
 from .proxies.ScalingRelations import query_gaia

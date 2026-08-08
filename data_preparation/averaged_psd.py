@@ -1,5 +1,5 @@
 import numpy as np
-import lightkurve as lk
+# import lightkurve as lk
 import time as t
 from .dataclasses import LightCurveData
 from numpy.typing import NDArray
