@@ -17,6 +17,7 @@ __all__ = [
     "NumaxFromCoefficientsOfVariation",
     # "NumaxFromFliPer",
     "NumaxFromScalingRelations"
+    "NumaxFromScalingRelations",
     # "NumaxFromEACF"
 ]
 
