@@ -22,8 +22,8 @@ from .proxies import (
     NumaxFromACF,
     NumaxFromScalingRelations,
     NumaxFromCoefficientsOfVariation,
-    NumaxFromFliPer,
-    NumaxFromEACF
+    # NumaxFromFliPer,
+    # NumaxFromEACF
 )
 
 class NumaxProxies:
@@ -110,36 +110,36 @@ class NumaxProxies:
 
         self.numax_estimates["numax_CoV"] = numax
 
-    def compute_numax_from_FliPer(self, plot=True):
-        """
-        Compute numax with method from Bugnet et al. (2018).
+    # def compute_numax_from_FliPer(self, plot=True):
+    #     """
+    #     Compute numax with method from Bugnet et al. (2018).
 
-        Input:
-            Noise estimate (usually done with magnitude, but we have to be a bit smarter)
-            Teff
-        """
-        gmag = self._mag
-        FliPer_proxy = NumaxFromFliPer(lc=self._lc, pg=self._pg, id=self._id, gmag=gmag)
+    #     Input:
+    #         Noise estimate (usually done with magnitude, but we have to be a bit smarter)
+    #         Teff
+    #     """
+    #     gmag = self._mag
+    #     FliPer_proxy = NumaxFromFliPer(lc=self._lc, pg=self._pg, id=self._id, gmag=gmag)
 
-        numax = FliPer_proxy.compute()
+    #     numax = FliPer_proxy.compute()
 
-        if plot:
-            FliPer_proxy.plot()
+    #     if plot:
+    #         FliPer_proxy.plot()
 
-        self._numax_estimates["numax_FliPer"] = numax
+    #     self._numax_estimates["numax_FliPer"] = numax
 
-    def compute_numax_from_EACF(self):
-        """Compute numax with method from Mosser & Appourchaux (2009) and I.W. Roxburgh (2009)"""
-        EACF_proxy = NumaxFromEACF(
-            star = self.star,
-            psd = self.avg_psd,
-            config = self.config,
-            eacf_config = self.eacf_config
-        )
-        EACF_proxy.compute()
+    # def compute_numax_from_EACF(self):
+    #     """Compute numax with method from Mosser & Appourchaux (2009) and I.W. Roxburgh (2009)"""
+    #     EACF_proxy = NumaxFromEACF(
+    #         star = self.star,
+    #         psd = self.avg_psd,
+    #         config = self.config,
+    #         eacf_config = self.eacf_config
+    #     )
+    #     EACF_proxy.compute()
 
-        if self.eacf_config.plot:
-            EACF_proxy.plot()
+    #     if self.eacf_config.plot:
+    #         EACF_proxy.plot()
 
     def plotting(self):
         """

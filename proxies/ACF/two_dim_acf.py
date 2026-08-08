@@ -159,17 +159,22 @@ def abs_acf(power_windows: list[np.ndarray]) -> list[np.ndarray]:
         if len(x) == 0:
             return np.array([], dtype=float)
 
+        # Center data
         x_centered = x - np.mean(x)
 
         # Can we do more here to minimize spectral leakage
         # x_centered *= hann(len(x_centered), sym=True)
 
+        # Perform autocorrelation by means of FFT
         corr = correlate(x_centered, x_centered, mode='full', method='fft')
 
+        # Grab positive lags only
         corr = corr[corr.size // 2 :] 
 
+        # Scale with 1/sqrt(N)
         scaling = 1 / np.sqrt(len(x))
 
+        # Return abs(corr) times scaling
         return np.abs(corr) * scaling
 
     return [_compute_single_acf(w) for w in power_windows]
