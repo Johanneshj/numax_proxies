@@ -53,7 +53,7 @@ class ProcessingConfig:
     save_psd            :   bool = False
     save_avgpsd         :   bool = False
     save_results        :   bool = False
-    results_directory   :   Optional[bool] = "numax_proxies/results"
+    results_directory   :   str = "numax_proxies/results"
 
     oversampling    :   float = 1.0
     width_for_wf    :   Optional[float] = None
@@ -84,7 +84,7 @@ class ACFConfig:
 class COVConfig:
     """CoV configuration"""
     plot                        :   Optional[str] = False
-    plot_log_scale          :   Optional[str] = False
+    plot_log_scale              :   Optional[str] = False
     min_freq                    :   Optional[float] = None
     max_freq                    :   Optional[float] = None
     overlap_scale               :   Optional[list[float]] = None

@@ -1,0 +1,98 @@
+# YAML config file for Numax Proxies pipeline
+
+STAR:
+  ## Star information
+  # Observational info
+  target: "KIC1872517" # target id
+  cadence: null
+  author: null
+  quarter: null
+  sector: null
+  mission: null
+
+  # Stellar parameters, must be given as lists []
+  # Can potentially be used for more numax estimates -> to be implemented later
+  logg: null # list of logg values [logg_1, logg_2]
+  logg_err: null # logg errors [logg_err_1, ...]
+  teff: null # list of teff values [teff_1, teff_2]
+  teff_err: null # teff errors [teff_err_1, ...]
+  radius: null # list of radius values [radius_1, radius_2]
+  radius_err: null # radius errors [radius_err_1, ...]
+  mass: null # list of mass values [mass_1, mass_2]
+  mass_err: null # mass errors [mass_err_1, ...]
+  luminosity: null # list of luminosity values [luminosity_1, luminosity_2]
+  luminosity_err: null # luminosity errors [luminosity_err_1, ...]
+  mag: null # magnitude
+
+LIGHTCURVE:
+  ## Light curve info
+  lc_file: 'numax_proxies/KIC1872517/data/LC_KIC1872517.ftr' # file location of lc file (.csv or .feather or .parquet)
+  fits_file_folder: # location of folder with fits files
+
+PSD:
+  ## In case you have already calculated spectra
+  psd_file: null # location of PSD file
+  avg_psd_file: null # location of averaged PSD file
+
+CONFIG:
+  ## Global configurating settings
+  
+  # Flags
+  normalize: True # normalize to ppm?
+  savgol: false # apply savgol filter?
+  query_gaia: False # query gaia for star data?
+  do_avg_psd: True # compute average PSD and use for calculations?
+  add_noise: False # add noise for testing?
+  sort: True # sort light curve by time
+  close_gaps: True # close gaps greather than "gap_size_days"
+  plot_lc: True # plot lc and psd
+  plot_all_estimates: True # plot all numax estimates in one diagram
+  save_lc: False
+  save_psd: False
+
+  # Parameters
+  oversampling: 2 # oversampling factor for full spectrum, can sometimes help with ACF (essentially increasing the resolution)
+  width_for_wf: null # width for window function
+  noise_std: 0.0 # value of noise std
+  savgol_window: 1.0 # savgol window length in days
+  avg_psd_chunk: 120.0 # averaged PSD chunk size, must be smaller than half the length of the timeseries
+  avg_psd_overlap: 0.99 # how many days each bin overlaps when generating the averaged PSD
+  initial_numax: null # initial numax guess
+  gap_size_days: 50.0 # gap size in days for close_gaps
+  results_directory: "numax_proxies/results" # results directory
+
+ACF_CONFIG:
+  ## ACF configuring parameters
+  plot : true # Do ACF plot?
+  plot_log_scale : false
+  sliding_window_style: "log_numax" # 'linear', 'logarithmic', or 'log_numax' (default)
+  min_freq: 1 # minimum frequency considered in ACF
+  max_freq: null # maximum frequency considered in ACF
+  overlap_scale: [2, 8, 16] # how much do bins overlap
+  width_factor: [0.5, 1.0, 1.5] # how wide are bins
+  smoothing_factor: [5, 10, 20]
+  max_acf_fit_iterations: 3 # iterations of ACF Gauss fit to optimize in terms of integral under envelope (maximum integral = correct numax)
+  n_sigma_numax_acf: 2 # width of envelope for integral
+  save_info: true
+  save_results: false
+
+COV_CONFIG:
+  # CoV configuring parameters
+  plot: true # Do CoV plot?
+  plot_log_scale: false
+  min_freq: 1
+  max_freq: null
+  overlap_scale: [2, 8, 16] # Default = 6 from Viani et al. 2019
+  width_factor: [0.5, 1.0, 1.5] # Default = 1.0
+  smoothing_factor: [5, 10, 20] # Width factor for smoothing window, default is 1
+  use_welch: False # Experimental
+  welch_seg_size: 90 # Experimental!
+  use_linear_bins: False # Experimental
+  use_Bell: false
+  FAP_threshold: '95p0' # Either '95p0', '99p0', or '99p9'
+  save_info: True
+  save_results: false
+
+EACF_CONFIG:
+  # EACF configuring parameters
+  plot: False
