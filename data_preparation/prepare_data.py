@@ -1,5 +1,5 @@
 import numpy as np
-import lightkurve as lk
+# import lightkurve as lk
 from collections import Counter
 import json
 import time as t

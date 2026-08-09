@@ -2,9 +2,9 @@ import numpy as np
 from numpy.typing import NDArray
 import time as t
 import itertools
-from typing import Union, List, Tuple
+from typing import Union, List#, Tuple
 from ...data_preparation.dataclasses import COVConfig
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 def log_numax_binning(
         frequency : NDArray, 
