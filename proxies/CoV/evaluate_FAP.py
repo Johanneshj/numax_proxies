@@ -5,9 +5,10 @@ from scipy.signal import savgol_filter
 from scipy.interpolate import RegularGridInterpolator as RGI
 from numpy.typing import NDArray
 
-def resample_FAP_values(bin_centers, database):
+def resample_FAP_values(bin_centers, database, FAP_threshold):
     """Generate a database of FAP values resampled to common set of bin centers"""
     resampled_database = {}
+    
     for key, d in database.items():
 
         # Window length for Savitzky-Golay filter
@@ -16,7 +17,7 @@ def resample_FAP_values(bin_centers, database):
             wl += 1
 
         # 95% threshold
-        filtered = savgol_filter(d['FAP_95p0'], window_length=wl, polyorder=2)
+        filtered = savgol_filter(d[f'FAP_{FAP_threshold}'], window_length=wl, polyorder=2)
         FAP95p0 = interp1d(
             d['bin_centers'],
             filtered,
@@ -25,34 +26,34 @@ def resample_FAP_values(bin_centers, database):
             fill_value=filtered[-1]
         )
 
-        # 99% threshold
-        filtered = savgol_filter(d['FAP_99p0'], window_length=wl, polyorder=2)
-        FAP99p0 = interp1d(
-            d['bin_centers'],
-            filtered,
-            kind='linear',
-            bounds_error=False,
-            fill_value=filtered[-1]
-        )
+        # # 99% threshold
+        # filtered = savgol_filter(d['FAP_99p0'], window_length=wl, polyorder=2)
+        # FAP99p0 = interp1d(
+        #     d['bin_centers'],
+        #     filtered,
+        #     kind='linear',
+        #     bounds_error=False,
+        #     fill_value=filtered[-1]
+        # )
 
-        # 99.9% threshold
-        filtered = savgol_filter(d['FAP_99p9'], window_length=wl, polyorder=2)
-        FAP99p9 = interp1d(
-            d['bin_centers'],
-            filtered,
-            kind='linear',
-            bounds_error=False,
-            fill_value=filtered[-1]
-        )
+        # # 99.9% threshold
+        # filtered = savgol_filter(d['FAP_99p9'], window_length=wl, polyorder=2)
+        # FAP99p9 = interp1d(
+        #     d['bin_centers'],
+        #     filtered,
+        #     kind='linear',
+        #     bounds_error=False,
+        #     fill_value=filtered[-1]
+        # )
 
         # Resampled database
         resampled_database[key] = {
             "bin_centers": bin_centers,
-            "FAP_95p0": FAP95p0(bin_centers),
-            "FAP_99p0": FAP99p0(bin_centers),
-            "FAP_99p9": FAP99p9(bin_centers),
+            f"FAP_{FAP_threshold}": FAP95p0(bin_centers)#,
+            # "FAP_99p0": FAP99p0(bin_centers),
+            # "FAP_99p9": FAP99p9(bin_centers),
         }
-    
+
     return resampled_database
 
 def grid_interpolator(resampled_database, FAP_threshold):
@@ -108,7 +109,7 @@ def evaluate_faps(
     # Resample FAP database to common bin centers
     resampled_databases = []
     for bcs in bin_centers:
-        resampled_databases.append(resample_FAP_values(bcs, database))
+        resampled_databases.append(resample_FAP_values(bcs, database, FAP_threshold))
 
     # Create Scipy ReguarGridInterpolator object
     interpolators = []

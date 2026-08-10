@@ -43,4 +43,4 @@ def plot_collapsed_acf_with_gaussian_fit(
     ax.set_xlabel("frequency [μHz]")
     ax.set_ylabel("norm. CACF strength")
     
-    ax.legend()
+    # ax.legend()

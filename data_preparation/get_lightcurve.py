@@ -1,6 +1,6 @@
 import glob
 import numpy as np
-import pyarrow.feather as feather
+from pyarrow import ipc
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -83,6 +83,7 @@ class GetLightcurve:
     def lightcurve_from_kepler_fits(self):
         """Load LC Kepler fits files"""
         # Only works for kepler right now
+        import lightkurve as lk
         n = int("".join(filter(str.isdigit, self._id)))
         target = f"{int(n):09d}"
         fits_files_folder = self._fits_files_folder
@@ -101,6 +102,7 @@ class GetLightcurve:
     def lightcurve_from_tess_fits(self):
         """Load LC TESS fits files"""
         # Only works for kepler right now
+        import lightkurve as lk
         n = int("".join(filter(str.isdigit, self._id)))
         target = f"{int(n):016d}"
         fits_files_folder = self._fits_files_folder
@@ -147,14 +149,16 @@ class GetLightcurve:
     
     def lightcurve_from_feather_file(self):
         """Load lc from .feather file"""
-        data = feather.read_feather(self._lc_file)
+        with ipc.open_file(self._lc_file) as reader:
+            data = reader.read_all()
+        time_arr = data["time"].to_numpy()
+        flux_arr = data["flux"].to_numpy()
         mask = (
-            ~np.isnan(data["time"])
-            & ~np.isnan(data["flux"])
+            ~np.isnan(time_arr)
+            & ~np.isnan(flux_arr)
         )
-        data = data[mask]
-        self._time = np.array(data["time"])
-        self._flux = np.array(data["flux"])
+        self._time = time_arr[mask]
+        self._flux = flux_arr[mask]
         self._flux_err = np.ones_like(self._flux) * np.nanstd(self._flux)
         return mask
 
