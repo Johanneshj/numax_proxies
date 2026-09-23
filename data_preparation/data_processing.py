@@ -2,6 +2,8 @@ import numpy as np
 from astropy.timeseries import LombScargle
 from scipy.integrate import simpson
 import matplotlib.pyplot as plt
+import scienceplots
+plt.style.use('science')
 import pandas as pd
 import time as t
 import os
@@ -11,7 +13,6 @@ from .dataclasses import LightCurveData, ProcessingConfig, COVConfig
 from typing import Optional, Literal
 from numpy.lib.stride_tricks import sliding_window_view as slw
 import nifty_ls
-import matplotlib.pyplot as plt
 
 class DataProcessing:
     def __init__(
@@ -197,9 +198,13 @@ class DataProcessing:
     def averaged_psd(self, chunk_len=90, overlap=0.0):
             """
             Author: Sylvain Breton
+            Co-author: Johannes Jørgensen
             email: sylvain.breton@inaf.it
+            email: johannes.joergensen@uibk.ac.at
             Created: 22 Nov 2024
+            Updated: July 2026
             INAF-OACT
+            UIBK
     
             Compute mean PSD of a light curve, by subdividing it
             into chunks of equal length. The light curve sampling
@@ -232,8 +237,7 @@ class DataProcessing:
             len_chunk = chunk_len
             while len_chunk >= np.max(time) / 2:
                 len_chunk -= 1
-            # if len_chunk >= np.max(time) / 2:
-            #     raise ValueError('chunk length for averaged PSD too long. Should be atleast 1/2 length of time series.')
+        
             size_chunk = int(len_chunk / dt)          
 
             # Generate overlapping chunks using sliding window view
@@ -436,10 +440,10 @@ class DataProcessing:
 
         axs[1].loglog(freq, power, c="k")
         axs[1].set_xlabel("frequency [muHz]")
-        axs[1].set_ylabel("PSD [ppm^2/muHz]")
+        axs[1].set_ylabel(r"PSD [$\text{ppm}^2/\mu\text{Hz}$]")
         axs[1].set_xlim(np.min(freq), np.max(freq))
 
-        savepath = os.path.join("numax_proxies", "results", self.id, "figures")
+        savepath = os.path.join(self.cfg.results_directory, self.id, "figures")
         os.makedirs(savepath, exist_ok=True)
         fig.savefig(f"{savepath}/lc_and_pg.png", dpi=300, bbox_inches="tight")
 

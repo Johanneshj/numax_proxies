@@ -1,6 +1,6 @@
 import glob
 import numpy as np
-from pyarrow import ipc
+# from pyarrow import ipc
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -149,8 +149,8 @@ class GetLightcurve:
     
     def lightcurve_from_feather_file(self):
         """Load lc from .feather file"""
-        with ipc.open_file(self._lc_file) as reader:
-            data = reader.read_all()
+        # with ipc.open_file(self._lc_file) as reader:
+        data = pd.read_feather(self._lc_file)
         time_arr = data["time"].to_numpy()
         flux_arr = data["flux"].to_numpy()
         mask = (
@@ -163,8 +163,8 @@ class GetLightcurve:
         return mask
 
     def lightcurve_from_parquet_file(self):
-        """Load lc from .feather file"""
-        df = pd.read_parquet(self._lc_file, engine='pyarrow')
+        """Load lc from .parquet file"""
+        df = pd.read_parquet(self._lc_file, engine='fastparquet')
         self._time = np.array(df['time'])
         self._flux = np.array(df['flux'])
         self._flux_err = np.array(df['flux_err'])

@@ -26,7 +26,7 @@ STAR:
 
 LIGHTCURVE:
   ## Light curve info
-  lc_file: 'numax_proxies/KIC1872517/data/LC_KIC1872517.ftr' # file location of lc file (.csv or .feather or .parquet)
+  lc_file: 'numax_proxies/KIC1872517/data/LC_KIC1872517.parquet' # file location of lc file (.csv or .feather or .parquet)
   fits_file_folder: # location of folder with fits files
 
 PSD:
@@ -41,7 +41,7 @@ CONFIG:
   normalize: True # normalize to ppm?
   savgol: false # apply savgol filter?
   query_gaia: False # query gaia for star data?
-  do_avg_psd: True # compute average PSD and use for calculations?
+  do_avg_psd: False # compute average PSD and use for calculations?
   add_noise: False # add noise for testing?
   sort: True # sort light curve by time
   close_gaps: True # close gaps greather than "gap_size_days"
@@ -68,13 +68,14 @@ ACF_CONFIG:
   sliding_window_style: "log_numax" # 'linear', 'logarithmic', or 'log_numax' (default)
   min_freq: 1 # minimum frequency considered in ACF
   max_freq: null # maximum frequency considered in ACF
-  overlap_scale: [2, 8, 16] # how much do bins overlap
-  width_factor: [0.5, 1.0, 1.5] # how wide are bins
-  smoothing_factor: [5, 10, 20]
+  overlap_scale: [4.0, 6.0, 8.0] # how much do bins overlap
+  width_factor: [0.1, 1.0, 1.5] # how wide are bins
+  smoothing_factor: [0.5, 1.0, 1.5]
   max_acf_fit_iterations: 3 # iterations of ACF Gauss fit to optimize in terms of integral under envelope (maximum integral = correct numax)
   n_sigma_numax_acf: 2 # width of envelope for integral
+  FAP_threshold: '95p0'
   save_info: true
-  save_results: false
+  save_results: true
 
 COV_CONFIG:
   # CoV configuring parameters
@@ -82,16 +83,16 @@ COV_CONFIG:
   plot_log_scale: false
   min_freq: 1
   max_freq: null
-  overlap_scale: [2, 8, 16] # Default = 6 from Viani et al. 2019
-  width_factor: [0.5, 1.0, 1.5] # Default = 1.0
-  smoothing_factor: [5, 10, 20] # Width factor for smoothing window, default is 1
+  overlap_scale: [4.0, 6.0, 8.0] # how much do bins overlap
+  width_factor: [1.0, 1.5] # how wide are bins
+  smoothing_factor: [0.5, 1.0, 1.5]
   use_welch: False # Experimental
   welch_seg_size: 90 # Experimental!
   use_linear_bins: False # Experimental
   use_Bell: false
   FAP_threshold: '95p0' # Either '95p0', '99p0', or '99p9'
   save_info: True
-  save_results: false
+  save_results: True
 
 EACF_CONFIG:
   # EACF configuring parameters

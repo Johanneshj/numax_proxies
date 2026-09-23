@@ -54,7 +54,7 @@ class NumaxFromCoefficientsOfVariation:
             4. Numax is defined as ufloat object.
         """
         # Bin spectrum (grey diamonds in plot)
-        self.bin_centers, self.freq_windows, self.power_windows = log_numax_binning(
+        self.binning_results = log_numax_binning(
             frequency=self.frequency, 
             power=self.power,
             min_freq=self.cov_config.min_freq,
@@ -65,53 +65,41 @@ class NumaxFromCoefficientsOfVariation:
 
         # Generate CoV values
         self.CoVs = calculate_CoVs(
-            bin_centers = self.bin_centers,
-            power_windows = self.power_windows
+            binning_results = self.binning_results
         )
 
         # Smooth CoV values
-        self.smoothed_CoVs = smooth_CoVs(
-            bin_centers = self.bin_centers,
-            CoVs = self.CoVs,
+        self.CoVs = smooth_CoVs(
+            cov_results = self.CoVs,
             cov_config = self.cov_config
-        )
+        )        
 
         # Evaluate FAPs
-        self.FAPs = evaluate_faps(
-            bin_centers = self.bin_centers,
-            length = np.max([np.min([self.length_timeseries, 1400]), 27]),
-            cadence = np.max([np.min([self.cadence_timeseries, 1800]), 20]),
-            overlap_scales = self.cov_config.overlap_scale,
-            width_factors = self.cov_config.width_factor,
-            FAP_threshold=self.cov_config.FAP_threshold
+        self.CoVs = evaluate_faps(
+            CoV_results = self.CoVs,
+            L           = np.max([np.min([self.length_timeseries, 2500]), 20]),
         )
 
-        self.results, self.fit_vals = global_fitting(
-            bin_centers     = self.bin_centers,
-            CoVs            = self.CoVs,
-            smoothed_CoVs   = self.smoothed_CoVs,
-            FAPs            = self.FAPs,
+        # Results
+        self.results = global_fitting(
+            CoV_results     = self.CoVs,
             initial_numax   = self.initial_numax
         )           
 
         return self
     
     
-    @property
-    def numax_estimate(self):
-        """Get numax and uncertainty"""
-        return self.numax
+    # @property
+    # def numax_estimate(self):
+    #     """Get numax and uncertainty"""
+    #     return self.numax
     
     def plot(self):
         """Plot if specified"""
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(5,4))
         plot_CoV(
-            bin_centers = self.bin_centers,
-            CoVs = self.CoVs,
-            smoothed_CoVs = self.smoothed_CoVs,
-            FAPs = self.FAPs,
-            global_fit_vals = self.fit_vals,
+            cov_results = self.results,
             initial_numax = self.initial_numax,
             ax = ax,
             target = self.id,
@@ -122,60 +110,29 @@ class NumaxFromCoefficientsOfVariation:
         fig.savefig(f"{savepath}/CoVs.png", dpi=300, bbox_inches="tight")
 
     def save_all_data(self):
-        """Save CoV calculations to txt file"""
-        # Save path location
-        savepath = Path(self.config.results_directory) / str(self.id) / "CoV_info"
-        savepath.mkdir(parents=True, exist_ok=True)
-
-
-        # Flattened lists
-        bcs = self.bin_centers
-        usacfs = self.CoVs
-        sacfs = self.smoothed_CoVs
-
-        nested_dict = {
-            'star'  : self.id,
-            'data'  : []
-        }
-
-        # Iterate over all bin centers, unsmoothed CoVs, and smoothed CoVs
-        # Also append fit values
-        i = 0
-        z = 0
-        for ov_scale in self.cov_config.overlap_scale:
-            for w_fac in self.cov_config.width_factor:
-
-                data_entry = {
-                    'overlap_scale'     : ov_scale,
-                    'width_factor'      : w_fac,
-                    'bin_centers'       : bcs[i],
-                    'unsmoothed_CoV'    : usacfs[i],
-                    'smoothed_CoVs'     : []
-                }
-
-                z = 0
-                for smoothing_fac in self.cov_config.smoothing_factor:
-                    data_entry['smoothed_CoVs'].append({
-                        'smoothing_factor'  : smoothing_fac,
-                        'smoothed_CoV'      : sacfs[i][z],
-                        'fit_vals'          : self.fit_vals[z]
-                    })
-                    z += 1
-                i += 1
-
-            nested_dict['data'].append(data_entry)
-
-        with gzip.open(f"{savepath}/all_data.pkl.gz", "wb") as f:
-            pickle.dump(nested_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+            """Save ACF calculations to txt file"""
+            # Save path location
+            savepath = Path(self.config.results_directory) / str(self.id) / "CoV_info"
+            savepath.mkdir(parents=True, exist_ok=True)
+    
+            with gzip.open(f"{savepath}/all_data.pkl.gz", "wb") as f:
+                pickle.dump(self.results, f, protocol=pickle.HIGHEST_PROTOCOL)
     
     def save_numax_estimates(self):
         """Save only numax estimates"""
-        savepath = Path(self.config.results_directory) / str(self.id) / "CoV_info"
+        savepath = Path(self.config.results_directory) / str(self.id) / "ACF_info"
         savepath.mkdir(parents=True, exist_ok=True)
 
+        numax_objs = [
+            data["fit_numax"] 
+            for data in self.results.values() 
+            if "fit_numax" in data
+        ]
+
+
         values = np.column_stack([
-            [x.n for x in self.results],
-            [x.s for x in self.results],
+            [x.n for x in numax_objs],
+            [x.s for x in numax_objs],
         ])
 
         np.savetxt(
@@ -187,8 +144,33 @@ class NumaxFromCoefficientsOfVariation:
         )
 
     @property   
-    def numax_estimate(self) -> float:
-        """Return mean numax estimate"""
-        numaxes = [x.n for x in self.results]
-        errs = [x.s for x in self.results]
-        return ufloat(np.mean(numaxes), np.mean(errs))
+    def numax_estimate(self) -> ufloat:
+        """Return median numax estimate and error across all parameter combinations."""
+        # Extract fit_numax objects from each parameter sub-dictionary
+        numax_objs = [
+            data["fit_numax"] 
+            for data in self.results.values() 
+            if "fit_numax" in data
+        ]
+
+        if not numax_objs:
+            return ufloat(np.nan, np.nan)
+
+        # Extract nominal value (.n) and standard error (.s) safely
+        numaxes = np.array([
+            x.n for x in numax_objs
+        ])
+        errs = np.array([
+            x.s for x in numax_objs
+        ])
+
+        # Filter out NaNs across both nominal values and errors
+        valid_mask = ~np.isnan(numaxes) & ~np.isnan(errs)
+
+        if not np.any(valid_mask):
+            return ufloat(np.nan, np.nan)
+
+        median_numax = np.median(numaxes[valid_mask])
+        median_err = np.median(errs[valid_mask])
+        
+        return ufloat(median_numax, median_err)

@@ -6,43 +6,84 @@ import warnings
 from numpy.typing import NDArray
 from uncertainties import ufloat
 import matplotlib.pyplot as plt
+from typing import Dict, Tuple
 
+
+import copy
+from typing import Dict, Tuple
+import numpy as np
 
 def fit_gauss_global(
-        bin_centers : list[NDArray],
-        smoothed_cacfs : list[NDArray],
-        initial_numax : float,
-        max_acf_fit_iterations : int,
-        n_sigma_numax_acf : float
-):
-    """Global fitting"""
+    cacf_results: Dict[Tuple[float, ...], dict],
+    initial_numax: float,
+    max_acf_fit_iterations: int,
+    n_sigma_numax_acf: float,
+    inplace: bool = True
+) -> Dict[Tuple[float, ...], dict]:
+    """
+    Performs global Gaussian fitting to collapsed ACFs across all parameter combinations
+    and updates cacf_results with the fitting outputs.
 
-    res_list = []
-    fit_vals = []
+    Parameters:
+    -----------
+    cacf_results : Dict[Tuple[float, ...], dict]
+        Dictionary containing 'bin_centers', 'fap', and smoothed CACF arrays.
+    initial_numax : float
+        Initial estimate for numax (microHz).
+    max_acf_fit_iterations : int
+        Maximum fitting iterations for fit_gauss_to_collapsed_acf.
+    n_sigma_numax_acf : float
+        Sigma multiplier defining the fitting window width around initial_numax.
+    use_normalized_cacf : bool
+        If True, uses 'cacf_norm_smoothed'; if False, uses 'cacf_smoothed'.
+    inplace : bool
+        If True, updates input dictionary directly. If False, updates a copy.
 
-    for i, (bcs, scacf) in enumerate(zip(bin_centers, smoothed_cacfs)):
+    Returns:
+    --------
+    Dict[Tuple[float, ...], dict]
+        The updated cacf_results dictionary where each sub-dictionary contains:
+        - All previous keys ('bin_centers', 'cacf_raw', 'cacf_smoothed', 'cacf_norm_smoothed', 'fap')
+        - "fit_numax": Fitted numax object/float
+        - "fit_params": Dict of fitted parameters ('amp', 'sigma', 'numax', 'y', 'numax_err')
+    """
+    results = cacf_results if inplace else copy.deepcopy(cacf_results)
+    cacf_key = "cacf_smoothed"
 
+    for param_key, data in results.items():
+        bcs = np.asarray(data["bin_centers"])
+        scacf = np.asarray(data[cacf_key])
+        fap = np.asarray(data["fap"])
+
+        # Perform Gaussian fit on current parameter combination
         numax, popt = fit_gauss_to_collapsed_acf(
-            smoothed_acf = np.asarray(scacf),
-            freq_centers = np.asarray(bcs),
-            initial_numax = initial_numax,
-            max_acf_fit_iterations = max_acf_fit_iterations,
-            n_sigma_numax_acf = n_sigma_numax_acf
-        ) 
-        res_list.append(numax)
-        fit_vals.append({
+            smoothed_acf=scacf,
+            freq_centers=bcs,
+            FAP=fap,
+            initial_numax=initial_numax,
+            max_acf_fit_iterations=max_acf_fit_iterations,
+            n_sigma_numax_acf=n_sigma_numax_acf
+        )
+
+        numax_err = getattr(numax, "s", getattr(numax, "std_dev", np.nan))
+
+        fit_params = {
             "amp": popt[0],
             "sigma": popt[1],
             "numax": popt[2],
             "y": popt[3],
-            "numax_err" : numax.s
-        })
+            "numax_err": numax_err
+        }
 
-    return res_list, fit_vals 
+        # Update sub-dictionary in-place
+        data["fit_numax"] = numax
+        data["fit_params"] = fit_params
+
+    return results
 
 
 
-def fit_gauss_to_collapsed_acf(smoothed_acf : NDArray, freq_centers : NDArray, initial_numax : float,
+def fit_gauss_to_collapsed_acf(smoothed_acf : NDArray, freq_centers : NDArray, FAP : NDArray, initial_numax : float,
                                max_acf_fit_iterations : float, n_sigma_numax_acf : float):
     """
     Fit Gaussian to collapsed ACF:
@@ -72,6 +113,14 @@ def fit_gauss_to_collapsed_acf(smoothed_acf : NDArray, freq_centers : NDArray, i
     x = x[valid]
     y = y[valid]
 
+    FAP_indexes = y >= FAP[valid]
+    significant_y = y[FAP_indexes]
+    significant_x = x[FAP_indexes]
+
+    if len(FAP_indexes) < 1:
+        print('No significant CACF values.')
+        return ufloat(np.nan, np.nan), [np.nan, np.nan, np.nan, np.nan]
+    
     # Iteratively maximize integral under identified envelope
     # Can help if program misidentifies numax in first iterations
     # Implemented by Enrico Corsaro, 2026, INAF - Catania
@@ -90,12 +139,12 @@ def fit_gauss_to_collapsed_acf(smoothed_acf : NDArray, freq_centers : NDArray, i
     # We do a "try" here in case fits fails or is underresolved
         try:
         # Initial guesses
-            amp0 = 0.8 * np.max(y_res)
+            amp0 = 0.8 * np.max(significant_x)
             w0 = (2/3) * numax0 ** (22/25)
             p0s = [amp0, w0, numax0, np.median(y_res)]
             # Bounds
-            lower_bounds = [0, 0, np.min(x_res), -.5]
-            upper_bounds = [1.5 * amp0, 2*w0, np.max(x_res), .5]
+            lower_bounds = [0, 0, np.min(x_res), np.min(y_res)]
+            upper_bounds = [1.5 * amp0, 2*w0, np.max(x_res), np.max(y_res)]
             popt, pcov = curve_fit(
                 gaussian,
                 x_res,
@@ -154,10 +203,16 @@ def fit_gauss_to_collapsed_acf(smoothed_acf : NDArray, freq_centers : NDArray, i
             nominal_value = numax_final, 
             std_dev = np.abs(numax_final_err)
         )
-        return numax_final, popt_final
+        
+        # Check if numax estimate exceeds FAP 
+        if np.any((FAP - popt_final[0]) <= 0):
+            return numax_final, popt_final
+        else:
+            print('Numax below ACF FAP threshold.')
+            return ufloat(np.nan, np.nan), [np.nan, np.nan, np.nan, np.nan]
     else:
         return ufloat(np.nan, np.nan), [np.nan, np.nan, np.nan, np.nan]
 
 def gaussian(x : NDArray, A : float, sigma : float, mu : float, y : float):
     """Gaussian function"""
-    return y + A * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
+    return y + A * np.exp(-((x - mu) ** 2) / (2 * sigma**2))   

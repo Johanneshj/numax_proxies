@@ -3,125 +3,155 @@ import warnings
 from scipy.optimize import curve_fit
 from scipy.optimize import OptimizeWarning
 from numpy.typing import NDArray
+from typing import Dict, Tuple
 from uncertainties import ufloat
+import copy
 
 def global_fitting(
-        bin_centers     :   list[NDArray],
-        CoVs            :   list[NDArray],
-        smoothed_CoVs   :   list[NDArray],
-        FAPs            :   list[NDArray],
-        initial_numax   :   float = None
-):
-    """Fit for numax estimates"""
+    CoV_results: Dict[Tuple[float, ...], dict],
+    initial_numax: float = None,
+    inplace: bool = True
+) -> Dict[Tuple[float, ...], dict]:
+    """
+    Fit for numax estimates across all parameter combinations in cov_results.
 
-    # Check if initial estimate of numax is provided, otherwise find it based on location of max CoV value.
-    if initial_numax:
-        numax_inits = [initial_numax]
+    Parameters:
+    -----------
+    cov_results : Dict[Tuple[float, ...], dict]
+        Dictionary keyed by (overlap_scale, width_factor, smoothing_factor) 
+        containing 'bin_centers' and 'cov_smoothed'.
+    initial_numax : float, optional
+        Initial estimate for numax. If None, computes initial estimates using 
+        get_initial_numax(cov_results).
+    inplace : bool
+        If True, updates input dictionary directly. If False, operates on a copy.
+
+    Returns:
+    --------
+    Dict[Tuple[float, ...], dict]
+        The updated dictionary where each entry contains:
+        - "fit_numax": ufloat object representing the fitted/estimated numax and error
+        - "fit_params": Dict with 'amp', 'sigma', 'numax', 'numax_err'
+    """
+    results = CoV_results if inplace else copy.deepcopy(CoV_results)
+
+    # Determine initial guesses for each entry
+    if initial_numax is None:
+        numax_inits = get_initial_numax(results)
     else:
-        numax_inits = get_initial_numax(bin_centers, CoVs, smoothed_CoVs, FAPs)
+        numax_inits = initial_numax
 
-    # Information we might want later
-    res_list = []
-    fit_vals = []
+    for param_key, data in results.items():
+        bcs = np.asarray(data["bin_centers"])
+        scov = np.asarray(data["cov_smoothed"])
 
-    # Fit for numax
-    idx = 0
-    for bcs, scovs in zip(bin_centers, smoothed_CoVs):
-        bcs = np.asarray(bcs)
-        for scov in scovs:
-            scov = np.asarray(scov)
-            # Define initial numax
-            if len(numax_inits) == 1:
-                numax_init = numax_inits[0]
+        # Retrieve initial guess for this specific parameter key
+        numax_init = numax_inits.get(param_key, np.nan) if isinstance(numax_inits, dict) else numax_inits
+
+        # Handle NaN initial guess
+        if np.isnan(numax_init) or numax_init is None:
+            data["fit_numax"] = ufloat(np.nan, np.nan)
+            data["fit_params"] = {
+                "amp": np.nan,
+                "sigma": np.nan,
+                "numax": np.nan,
+                "numax_err": np.nan
+            }
+            continue
+
+        # Define frequency window around initial numax
+        width = 0.66 * (numax_init ** 0.88)
+        lower = numax_init - width
+        upper = numax_init + width
+        indices = np.where((bcs >= lower) & (bcs <= upper))[0]
+
+        # Check if window contains valid data
+        if len(indices) == 0:
+            data["fit_numax"] = ufloat(np.nan, np.nan)
+            data["fit_params"] = {
+                "amp": np.nan,
+                "sigma": np.nan,
+                "numax": np.nan,
+                "numax_err": np.nan
+            }
+            continue
+
+        # Attempt fit
+        numax, popt, successful_fit = fit_for_numax(
+            bcs[indices],
+            scov[indices],
+            numax_init
+        )
+
+        if successful_fit and popt is not None:
+            numax_err = getattr(numax, "s", getattr(numax, "std_dev", np.nan))
+            
+            data["fit_numax"] = numax
+            data["fit_params"] = {
+                "amp": popt[0],
+                "sigma": popt[1],
+                "numax": popt[2],
+                "numax_err": numax_err
+            }
+
+        # Fallback method (Viani+ 2019): Weighted sum of powers
+        else:
+            numerator = np.nansum(bcs[indices] * scov[indices])
+            denominator = np.nansum(scov[indices])
+
+            if denominator == 0 or np.isnan(denominator) or denominator is None:
+                data["fit_numax"] = ufloat(np.nan, np.nan)
             else:
-                numax_init = numax_inits[idx]
+                numax_estimate = numerator / denominator
+                numax_err_estimate = np.abs(np.nanstd(bcs[indices], ddof=1))
+                data["fit_numax"] = ufloat(numax_estimate, numax_err_estimate)
 
-            # Check if initial numax is nan
-            if np.isnan(numax_init):
-                # Append nan to res
-                res_list.append(ufloat(np.nan, np.nan))
-                # Append nans to fit vals
-                fit_vals.append({
-                    "amp": np.nan,
-                    "sigma": np.nan,
-                    "numax": np.nan,
-                    "numax_err": np.nan
-                })
-                continue
+            data["fit_params"] = {
+                "amp": np.nan,
+                "sigma": np.nan,
+                "numax": np.nan,
+                "numax_err": np.nan
+            }
 
-            # Define region for evaluating power
-            width = 0.66 * (numax_init ** 0.88)
-            lower = numax_init - width
-            upper = numax_init + width
-            indices = np.where((bcs >= lower) & (bcs <= upper))[0]
-
-            # Fit for numax
-            numax, popt, succesful_fit = fit_for_numax(
-                bcs[indices],
-                scov[indices],
-                numax_init
-            )
-
-            # If fit was succesful append numax, numax_err and True
-            if succesful_fit and popt is not None:
-                # Append ufloat numax to res_list
-                res_list.append(numax)
-
-                # Append to fit_vals
-                fit_vals.append({
-                    "amp": popt[0],
-                    "sigma": popt[1],
-                    "numax": popt[2],
-                    "numax_err": popt[1]
-                })
-
-            # If fit failed default to method from Viani+ 2019:
-            # Evaluate sum of powers
-            else:
-                numerator = np.nansum(bcs[indices] * scov[indices])
-                denominator = np.nansum(scov[indices])
-                if denominator == 0 or np.isnan(denominator) or denominator is None:
-                    res_list.append(ufloat(np.nan, np.nan))
-                else:
-                    numax_estimate = numerator / denominator
-                    numax_err_estimate = np.abs(np.nanstd(bcs[indices], ddof=1))
-                    res_list.append(ufloat(numax_estimate, numax_err_estimate))
-
-                # Append nans to fit vals
-                fit_vals.append({
-                    "amp": np.nan,
-                    "sigma": np.nan,
-                    "numax": np.nan,
-                    "numax_err": np.nan
-                })
-            idx += 1
-    # Return numax estimates, error estimates, and succesful fit bools
-    return res_list, fit_vals
+    return results
         
     
 def get_initial_numax(
-        bin_centers     :   list[NDArray],
-        CoVs            :   list[NDArray],
-        smoothed_CoVs   :   list[NDArray],
-        FAPs            :   list[NDArray]
-) -> list[float]:
-    """Determine which bin center should serve as initial numax guess"""
+    cov_results: Dict[Tuple[float, ...], dict]
+) -> Dict[Tuple[float, ...], float]:
+    """
+    Determine which bin center should serve as initial numax guess for each 
+    parameter combination in cov_results.
 
-    # Master initial numax list
-    numax_inits: list[float] = []
+    Parameters:
+    -----------
+    cov_results : Dict[Tuple[float, ...], dict]
+        Dictionary keyed by parameter tuples containing 'bin_centers', 'cov',
+        'cov_smoothed', and 'fap'.
 
-    # First loop of bcs, cov, and fap to determine good indices
-    for bcs, cov, fap, scovs in zip(bin_centers, CoVs, FAPs, smoothed_CoVs):
-        bcs = np.asarray(bcs)
-        cov = np.asarray(cov)
-        fap = np.asarray(fap)
+    Returns:
+    --------
+    Dict[Tuple[float, ...], float]
+        Dictionary mapping each parameter key to its initial numax estimate (in microHz).
+    """
+    numax_inits: Dict[Tuple[float, ...], float] = {}
 
-        # Check good indices where CoV exceeds FAP
-        fap_mask = cov > fap
+    for param_key, data in cov_results.items():
+        bcs = np.asarray(data["bin_centers"])
+        cov = np.asarray(data["cov"])
+        scov = np.asarray(data["cov_smoothed"])
 
-        # In case we are below CoV threshold we append np.nans for each smoothing factor
+        # Check if FAP exists in dictionary entry
+        if "fap" in data and data["fap"] is not None:
+            fap = np.asarray(data["fap"])
+            fap_mask = cov > fap
+        else:
+            # Fallback if no FAP filter applied: treat all bins as valid candidates
+            fap_mask = np.ones_like(cov, dtype=bool)
+
+        # In case no points exceed the FAP threshold
         if not np.any(fap_mask):
-            numax_inits.extend([np.nan] * len(scovs))
+            numax_inits[param_key] = np.nan
             continue
 
         # Upper detection threshold to avoid spurious peaks
@@ -131,16 +161,15 @@ def get_initial_numax(
         # Define final mask
         final_mask = spurious_mask if np.any(spurious_mask) else fap_mask
         final_bcs = bcs[final_mask]
+        valid_scov = scov[final_mask]
 
-        # Append best numax init for each smoothing factor 
-        for scov in scovs:
-            scov = np.asarray(scov)
-            valid_scov = scov[final_mask]
-            
+        # Find frequency corresponding to max smoothed CoV within valid range
+        if len(valid_scov) > 0:
             best_idx = np.argmax(valid_scov)
-            numax_inits.append(float(final_bcs[best_idx]))
+            numax_inits[param_key] = float(final_bcs[best_idx])
+        else:
+            numax_inits[param_key] = np.nan
 
-    # Return numax inits list
     return numax_inits
 
 

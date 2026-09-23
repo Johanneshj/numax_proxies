@@ -4,12 +4,13 @@ from typing import Dict, Tuple
 from numpy.typing import NDArray
 
 def evaluate_faps(
-    CoV_results: Dict[Tuple[float, ...], dict],
+    cacf_results: Dict[Tuple[float, ...], dict],
     L: float,
-    filepath: str = "numax_proxies/proxies/CoV/COV_FAP_fit_coefficients.txt",
+    filepath: str = "numax_proxies/proxies/ACF/ACF_FAP_fit_coefficients.txt",
+    c: float = 0.0,
 ) -> Dict[Tuple[float, ...], dict]:
     """
-    Evaluates the FAP curve y(x) = - (a/np.pi) * np.arctan(b * (x - c)) + d + a / 2
+    Evaluates the FAP curve y(x) = a / (1 + exp(b * (x - c))) + d
     by reading fitted surface parameters from a JSON/text file, and updates 
     each sub-dictionary in cacf_results with a 'fap' entry.
 
@@ -22,6 +23,10 @@ def evaluate_faps(
         Timeseries length in days.
     filepath : str
         Path to the saved surface fit text/JSON file.
+    c : float
+        Shift parameter (default = 0.0).
+    use_log10_bcs : bool
+        If True, evaluates grid points x as log10(bin_centers) (default = True).
 
     Returns:
     --------
@@ -39,14 +44,14 @@ def evaluate_faps(
     # Cache calculated (a, b, d) parameters per width_factor to avoid duplicate matrix ops
     param_cache = {}
 
-    for key, data in CoV_results.items():
+    for key, data in cacf_results.items():
         # Extract width_factor from key tuple: (overlap_scale, width_factor, [smoothing_factor])
         width_factor = float(key[1])
 
         # Evaluate 2D surface polynomial for this width_factor if not already in cache
         if width_factor not in param_cache:
             params = {}
-            for p in ["a", "b", "c", "d"]:
+            for p in ["a", "b", "d"]:
                 deg = degrees[p]
                 c_vec = np.array(coeffs[p])
                 A = _build_poly2d_features(logL, width_factor, deg)
@@ -60,13 +65,13 @@ def evaluate_faps(
         x_arr = np.log10(bin_centers)
 
         # Evaluate logistic FAP curve
-        a, b, c, d = params["a"], params["b"], params["c"], params["d"]
-        fap = - (a/np.pi) * np.arctan(b * (x_arr - c)) + d + a / 2
+        a, b, d = params["a"], params["b"], params["d"]
+        fap = a / (1.0 + np.exp(b * (x_arr - c))) + d
 
         # Update dictionary entry in-place
         data["fap"] = fap
 
-    return CoV_results
+    return cacf_results
 
 def _build_poly2d_features(x, y, degree):
     """Builds 2D polynomial features for logL (x) and W (y)."""

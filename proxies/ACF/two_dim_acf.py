@@ -3,11 +3,15 @@ import numpy as np
 from numpy.typing import NDArray
 import time as t
 import itertools
-from typing import Union, List, Tuple
+from typing import Dict, List, Tuple, Union
 from ...data_preparation.dataclasses import ACFConfig
 from scipy.signal import correlate
 from scipy.signal.windows import hann
 import matplotlib.pyplot as plt
+
+ParamKey = Tuple[float, float]  # (overlap_scale, width_factor)
+BinningResult = Dict[str, List[NDArray]]
+FullParamKey = Tuple[float, float, float] # (overlap_scale, width_factor, smoothing_factor)
 
 def calculate_relative_power(frequency : NDArray, power : NDArray):
     """Subtract and normalize PSD by median filter (Viani+ 2019)"""
@@ -45,24 +49,34 @@ def calculate_two_dim_ACF(frequency : NDArray, power : NDArray, acf_config : ACF
     
     start = t.time()
   
-    bin_centers, freq_windows, power_windows = log_numax_binning(
+    binned_data = log_numax_binning(
         frequency           =   frequency,
         power               =   power,
         overlap_scales      =   acf_config.overlap_scale,
         min_freq            =   acf_config.min_freq,
         max_freq            =   acf_config.max_freq,
-        width_factors       =   acf_config.width_factor,
-        smoothing_factors   =   acf_config.smoothing_factor
+        width_factors       =   acf_config.width_factor#,
+        # smoothing_factors   =   acf_config.smoothing_factor
     )
 
     # Calculate acf for each segment
-    acfs = [abs_acf(pw) for pw in power_windows]
+    # print(binned_data)
+    # print(binned_data.items())
+    two_dim_acf_results = {}
+    for param_key, data in binned_data.items():
+        # print(len(data["bin_centers"]), len(data["power_windows"]))
+        acfs = abs_acf(data["power_windows"])# for pw in data["power_windows"]]
+        
+        two_dim_acf_results[param_key] = {
+            "bin_centers": data["bin_centers"],
+            "freq_windows": data["freq_windows"],
+            "acfs": acfs
+        }
 
     end = t.time()
+    print(f'2D ACF calculation time: {np.round(end - start, 3)} seconds')
 
-    print(f'2D ACF calculation time: {np.round(end-start, 3)} seconds')
-
-    return bin_centers, freq_windows, acfs
+    return two_dim_acf_results
 
 def log_numax_binning(
         frequency : NDArray, 
@@ -70,13 +84,14 @@ def log_numax_binning(
         overlap_scales : Union[float, List[float]] = 6, 
         min_freq : float = 100, 
         max_freq : float = None, 
-        width_factors : Union[float, List[float]] = 1,
-        smoothing_factors : Union[float, List[float]] = 1
-) -> tuple[
-        list[np.ndarray],
-        list[list[np.ndarray]],
-        list[list[np.ndarray]],
-    ]:   
+        width_factors : Union[float, List[float]] = 1
+        # smoothing_factors : Union[float, List[float]] = 1
+) -> Dict[ParamKey, BinningResult]: 
+# -> tuple[
+#         list[np.ndarray],
+#         list[list[np.ndarray]],
+#         list[list[np.ndarray]],
+#     ]:   
     """
         Perform sliding window as used for CoV method in Viani+ 2019.
         Basically, around each bin center the bin size will be defined as
@@ -97,14 +112,16 @@ def log_numax_binning(
     factors = [float(width_factors)] if isinstance(width_factors, (int, float)) else [float(w) for w in width_factors]
 
     # Smoothing factors will only be used here to determine the dimensionality of the res_list
-    smoothing_factors = ([float(smoothing_factors)] if isinstance(smoothing_factors, (int, float)) else [float(s) for s in smoothing_factors])
+    # smoothing_factors = ([float(smoothing_factors)] if isinstance(smoothing_factors, (int, float)) else [float(s) for s in smoothing_factors])
 
     if max_freq is None:
         max_freq = frequency[-1]
 
-    bcs:    List[NDArray] = []
-    fs:     List[NDArray] = []
-    ps:     List[NDArray] = []
+    # bcs:    List[NDArray] = []
+    # fs:     List[NDArray] = []
+    # ps:     List[NDArray] = []
+
+    results = {}
 
     # Loop of overlap scales and width factors
     for scale, factor in itertools.product(scales, factors):
@@ -138,11 +155,13 @@ def log_numax_binning(
             freqs.append(frequency[idx_start:idx_end])
             powers.append(power[idx_start:idx_end])
 
-        bcs.append(bin_centers)
-        fs.append(freqs)
-        ps.append(powers)
+        results[(scale, factor)] = {
+            "bin_centers": np.array(bin_centers),
+            "freq_windows": freqs,
+            "power_windows": powers
+        }
 
-    return bcs, fs, ps
+    return results
 
 def abs_acf(power_windows: list[np.ndarray]) -> list[np.ndarray]:
     """
@@ -158,7 +177,7 @@ def abs_acf(power_windows: list[np.ndarray]) -> list[np.ndarray]:
     def _compute_single_acf(x: NDArray) -> NDArray:
         if len(x) == 0:
             return np.array([], dtype=float)
-
+        
         # Center data
         x_centered = x - np.mean(x)
 
@@ -201,7 +220,7 @@ def smoothing_func(
     bin_centers: NDArray,
     collapsed_acf: NDArray,
     smoothing_factors: Union[float, list[float]] = 5.0,
-) -> list[NDArray]:
+) -> Dict[float, NDArray]:
     """Smooth CACF values with FWHM of potential oscillation envelope"""
 
     bin_centers = np.asarray(bin_centers)
@@ -216,56 +235,66 @@ def smoothing_func(
 
     # Empty list
     all_smoothed = []
-
+    smoothed_results = {}
     # Smooth
     bin_widths = 0.66 * bin_centers**0.88
+
     for factor in factors:
+
         smoothed = np.empty_like(collapsed_acf)
 
-        for i, (center, width) in enumerate(zip(bin_centers, bin_widths)):
+        half_widths = factor * bin_widths / 2
 
-            lower = center - width / factor
-            upper = center + width / factor
+        lowers = bin_centers - half_widths
+        uppers = bin_centers + half_widths
 
-            mask = (bin_centers >= lower) & (bin_centers <= upper)
+        # Binary search indices since bin_centers is sorted
+        idx_starts = np.searchsorted(bin_centers, lowers, side="left")
+        idx_ends = np.searchsorted(bin_centers, uppers, side="right")
 
-            smoothed[i] = np.nanmean(collapsed_acf[mask]) if np.any(mask) else np.nan
+        for i, (start, end) in enumerate(zip(idx_starts, idx_ends)):
+            if start < end:
+                smoothed[i] = np.nanmean(collapsed_acf[start:end])
+            else:
+                smoothed[i] = np.nan
 
-        all_smoothed.append(smoothed)
+        smoothed_results[factor] = smoothed
         
-    return all_smoothed
+    return smoothed_results
 
 def collapsed_acf(
-    bin_centers:    list[NDArray],
-    acfs:           list[NDArray],
+    # bin_centers:    list[NDArray],
+    # acfs:           list[NDArray],
+    two_dim_acf_results: Dict[Tuple[float, float], dict],
     acf_config:     ACFConfig
-) -> tuple[
-    list[np.ndarray],
-    list[list[np.ndarray]],
-]:
-    all_cacfs = [
-        np.array([collapse_segment(seg) for seg in acf])
-        for acf in acfs
-    ]
+) -> Dict[FullParamKey, Dict[str, NDArray]]:
 
-    smoothed_cacfs = [
-        smoothing_func(centers, cacf, acf_config.smoothing_factor)
-        for centers, cacf in zip(bin_centers, all_cacfs)
-    ]
+    smoothing_factors = acf_config.smoothing_factor
 
-    flat_bin_centers = []
-    norm_unsmoothed = []
-    norm_smoothed = []
+    results = {}
 
-    for bcs, u_cacf, scacfs in zip(bin_centers, all_cacfs, smoothed_cacfs):
-        u_norm = normalize_0_1(u_cacf)
-        
-        for scacf in scacfs:
-            flat_bin_centers.append(bcs)
-            norm_unsmoothed.append(u_norm)
-            norm_smoothed.append(normalize_0_1(scacf))
+    for (overlap_scale, width_factor), data in two_dim_acf_results.items():
+        bcs = data['bin_centers']
+        acfs = data['acfs']
 
-    return flat_bin_centers, norm_unsmoothed, norm_smoothed
+        cacf_unsmoothed = np.array([collapse_segment(seg) for seg in acfs])
+
+        cacfs_smoothed = smoothing_func(
+            bin_centers=bcs,
+            collapsed_acf=cacf_unsmoothed,
+            smoothing_factors=smoothing_factors
+        )
+    
+        for smooth_factor, cacf_smoothed in cacfs_smoothed.items():
+            full_key = (overlap_scale, width_factor, smooth_factor)
+            results[full_key] = {
+                "bin_centers": bcs,
+                "cacf_raw": cacf_unsmoothed,
+                "cacf_smoothed": cacf_smoothed,
+                # "cacf_norm_smoothed": normalize_0_1(cacf_smoothed)
+            }
+
+    return results
 
 def normalize_0_1(x : NDArray):
     """Normalize between 0 and 1."""

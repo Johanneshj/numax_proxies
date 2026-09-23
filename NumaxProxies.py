@@ -9,8 +9,8 @@ import numpy as np
 # from numpy.typing import NDArray
 import pandas as pd
 import yaml
-import pyarrow.feather as feather
-# import time as t
+# import pyarrow.feather as feather
+import time as t
 # import matplotlib.pyplot as plt
 
 # Internal imports
@@ -50,6 +50,8 @@ class NumaxProxies:
             avg_psd = self.avg_psd if self.config.do_avg_psd else self.psd, # sometimes we don't want to use averaged psd
             acf_config = self.acf_config,
             config = self.config,
+            length_timeseries=self.lc.length_days,
+            cadence_timeseries=self.lc.cadence_secs,
             id = self.star.target,
         )
         numax = acf_proxy.compute().numax_estimate
@@ -81,8 +83,9 @@ class NumaxProxies:
         """
         Compute νmax using coefficients of variation (Vianni et al. 2018)
         """
+        start = t.time()
         CoV_proxy = NumaxFromCoefficientsOfVariation( 
-            psd=self.welch_psd if self.cov_config.use_welch else self.psd, 
+            psd=self.avg_psd if self.config.do_avg_psd else self.psd, 
             config=self.config,
             cov_config = self.cov_config,
             id=self.star.target,
@@ -110,6 +113,9 @@ class NumaxProxies:
 
         self.numax_estimates["numax_CoV"] = numax
 
+        end = t.time()
+
+        print(f'CoV time: {np.round(end-start, 3)} seconds')
     # def compute_numax_from_FliPer(self, plot=True):
     #     """
     #     Compute numax with method from Bugnet et al. (2018).
@@ -148,7 +154,8 @@ class NumaxProxies:
         plot_spectrum_with_all_numax_estimates(
             psd = self.psd,
             star = self.star,
-            numax_estimates = self.numax_estimates
+            numax_estimates = self.numax_estimates,
+            config = self.config
         )
 
     @property

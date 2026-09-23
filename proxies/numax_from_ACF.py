@@ -5,6 +5,7 @@ from .ACF import (
     fit_gauss_global,
     plot_spec,
     plot_collapsed_acf_with_gaussian_fit,
+    evaluate_faps
 )
 import json
 import os
@@ -17,6 +18,9 @@ import gzip
 import pickle
 import pandas as pd
 from uncertainties import ufloat
+import matplotlib.pyplot as plt
+import scienceplots
+plt.style.use('science')
 
 class NumaxFromACF:
     def __init__(
@@ -24,6 +28,8 @@ class NumaxFromACF:
         avg_psd : AvgPSDData,
         acf_config : ACFConfig,
         config : ProcessingConfig,
+        length_timeseries : Optional[float] = None,
+        cadence_timeseries : Optional[float] = None,
         id : Optional[str] = "unknown",
         initial_numax : Optional[float] = None
     ):
@@ -41,51 +47,63 @@ class NumaxFromACF:
         self.id = id
         self.initial_numax = initial_numax
 
+        self.length_timeseries = length_timeseries
+        self.cadence_timeseries = cadence_timeseries
+
     def compute(self):
         """Perform 2D ACF computations"""
+
         # Normalize spectrum
         self.normalized_power, self.med_filter = calculate_relative_power(
             self.frequency, self.avg_psd
         )
+        
         # Calculate 2D ACF
-        self.bin_centers, self.freq_windows, self.acfs = calculate_two_dim_ACF(
+        self.two_dim_acf_results = calculate_two_dim_ACF(
             frequency   = self.frequency, 
             power       = self.normalized_power,
             acf_config  = self.acf_config
         )
+
         # Collapse 2D ACF and smooth and generate flattened bin_centers
-        self.bin_centers, self.unsmoothed_cacfs, self.smoothed_cacfs = collapsed_acf(
-            bin_centers     = self.bin_centers,  
-            acfs            = self.acfs,
-            acf_config      = self.acf_config
+        self.cacf_results = collapsed_acf(
+            two_dim_acf_results = self.two_dim_acf_results,  
+            acf_config          = self.acf_config
         )
+
+        # Evaluate FAP
+        self.cacf_results = evaluate_faps(
+            cacf_results    = self.cacf_results,
+            L               = np.max([np.min([self.length_timeseries, 2500]), 20]),
+        )
+        # print(self.FAPs)
+        # print(len(self.bin_centers), len(self.unsmoothed_cacfs), len(self.smoothed_cacfs), len(self.FAPs))
         # Fit gauss to estimate numax
-        self.results, self.fit_vals = fit_gauss_global(
-            bin_centers             = self.bin_centers, 
-            smoothed_cacfs          = self.smoothed_cacfs, 
+        self.results = fit_gauss_global(
+            cacf_results            = self.cacf_results, 
             initial_numax           = self.initial_numax,
             max_acf_fit_iterations  = self.acf_config.max_acf_fit_iterations,
             n_sigma_numax_acf       = self.acf_config.n_sigma_numax_acf,
         )
-
         return self
 
     def plot(self):
         """Plot 2D ACF computations if specified"""
         import matplotlib.pyplot as plt
-    
-        fig, axs = plt.subplots(2, 1, figsize=(6, 8))
+        fig, axs = plt.subplots(2, 1, figsize=(5, 7))
         plot_spec(
             self.frequency,
             self.avg_psd,
             self.med_filter,
             ax=axs[0],
             id=self.id,
+            acf_config=self.acf_config
         )
         plot_collapsed_acf_with_gaussian_fit(
-            self.smoothed_cacfs, self.unsmoothed_cacfs, 
-            self.bin_centers, self.fit_vals, self.initial_numax,
-            ax=axs[1], acf_config=self.acf_config
+            results         = self.results, 
+            initial_numax   = self.initial_numax,
+            ax              = axs[1], 
+            acf_config      = self.acf_config
         )
         savepath = os.path.join(self.config.results_directory, self.id, "figures")
         os.makedirs(savepath, exist_ok=True)
@@ -101,55 +119,23 @@ class NumaxFromACF:
         savepath = Path(self.config.results_directory) / str(self.id) / "ACF_info"
         savepath.mkdir(parents=True, exist_ok=True)
 
-
-        # Flattened lists
-        bcs = self.bin_centers
-        usacfs = self.unsmoothed_cacfs
-        sacfs = self.smoothed_cacfs
-
-        nested_dict = {
-            'star'  : self.id,
-            'data'  : []
-        }
-
-        # Iterate over all bin centers, unsmoothed cacfs, and smoothed cacfs
-        # Also append fit values
-        i = 0
-        z = 0
-        for ov_scale in self.acf_config.overlap_scale:
-            for w_fac in self.acf_config.width_factor:
-
-                data_entry = {
-                    'overlap_scale'     : ov_scale,
-                    'width_factor'      : w_fac,
-                    'bin_centers'       : bcs[i],
-                    'unsmoothed_cacf'   : usacfs[i],
-                    'smoothed_cacfs'    : []
-                }
-
-
-                for smoothing_fac in self.acf_config.smoothing_factor:
-                    data_entry['smoothed_cacfs'].append({
-                        'smoothing_factor': smoothing_fac,
-                        'smoothed_cacf'   : sacfs[z],
-                        'fit_vals'        : self.fit_vals[z]
-                    })
-                    z += 1
-                i += 1
-
-            nested_dict['data'].append(data_entry)
-
         with gzip.open(f"{savepath}/all_data.pkl.gz", "wb") as f:
-            pickle.dump(nested_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(self.results, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def save_numax_estimates(self):
         """Save only numax estimates"""
-        savepath = Path(self.config.results_directory) / str(self.id) / "ACF_info"
+        savepath = Path(self.config.results_directory) / str(self.id) / "CoV_info"
         savepath.mkdir(parents=True, exist_ok=True)
 
+        numax_objs = [
+            data["fit_numax"] 
+            for data in self.results.values() 
+            if "fit_numax" in data
+        ]
+
         values = np.column_stack([
-            [x.n for x in self.results],
-            [x.s for x in self.results],
+            [x.n for x in numax_objs],
+            [x.s for x in numax_objs],
         ])
 
         np.savetxt(
@@ -161,10 +147,35 @@ class NumaxFromACF:
         )
 
     @property   
-    def numax_estimate(self) -> float:
-        """Return mean numax estimate"""
-        numaxes = [x.n for x in self.results]
-        errs = [x.s for x in self.results]
-        return ufloat(np.mean(numaxes), np.mean(errs))
+    def numax_estimate(self) -> ufloat:
+        """Return median numax estimate and error across all parameter combinations."""
+        # Extract fit_numax objects from each parameter sub-dictionary
+        numax_objs = [
+            data["fit_numax"] 
+            for data in self.results.values() 
+            if "fit_numax" in data
+        ]
+
+        if not numax_objs:
+            return ufloat(np.nan, np.nan)
+
+        # Extract nominal value (.n) and standard error (.s) safely
+        numaxes = np.array([
+            x.n for x in numax_objs
+        ])
+        errs = np.array([
+            x.s for x in numax_objs
+        ])
+
+        # Filter out NaNs across both nominal values and errors
+        valid_mask = ~np.isnan(numaxes) & ~np.isnan(errs)
+
+        if not np.any(valid_mask):
+            return ufloat(np.nan, np.nan)
+
+        median_numax = np.median(numaxes[valid_mask])
+        median_err = np.median(errs[valid_mask])
+
+        return ufloat(median_numax, median_err)
     
 

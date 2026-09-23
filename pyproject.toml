@@ -24,6 +24,7 @@ dependencies = [
     "finufft>=2.2",
     "pyarrow>=25.0.0",
     "nifty-ls @ git+https://github.com/flatironinstitute/nifty-ls.git@main",
+    "SciencePlots"
 ]
 
 [tool.setuptools.packages.find]

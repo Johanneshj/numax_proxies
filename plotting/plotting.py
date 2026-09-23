@@ -1,10 +1,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-from ..data_preparation.dataclasses import PSDData, StarInfo
+from ..data_preparation.dataclasses import PSDData, StarInfo, ProcessingConfig
+import matplotlib.pyplot as plt
+import scienceplots
+plt.style.use('science')
 
-def plot_spectrum_with_all_numax_estimates(psd : PSDData, star : StarInfo, numax_estimates : dict):
-    fig, ax = plt.subplots()
+def plot_spectrum_with_all_numax_estimates(
+        psd : PSDData, 
+        star : StarInfo, 
+        numax_estimates : dict,
+        config : ProcessingConfig
+):
+    fig, ax = plt.subplots(figsize=(4,3))
     ax.loglog(psd.frequency, psd.psd, c="gray")
     for label, numax in numax_estimates.items():
         try:
@@ -48,7 +56,8 @@ def plot_spectrum_with_all_numax_estimates(psd : PSDData, star : StarInfo, numax
 
     ax.legend(loc="lower left", title=f"{star.target} " + r"$\nu_\text{max} \ [\mu\text{Hz}]$")
     
-    savepath = os.path.join("numax_proxies", "results", f'{star.target}', "figures")
+    # savepath = os.path.join("numax_proxies", "results", f'{star.target}', "figures")
+    savepath = os.path.join(config.results_directory, star.target, "figures")
     os.makedirs(savepath, exist_ok=True)
     fig.savefig(
         f"{savepath}/full_spectrum_with_all_estimates.png", dpi=300, bbox_inches="tight"

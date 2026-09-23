@@ -77,6 +77,7 @@ class ACFConfig:
     smoothing_factor        :   Optional[list[float]] = None
     max_acf_fit_iterations  :   int = 1
     n_sigma_numax_acf       :   float = 2 
+    FAP_threshold           :   Optional[str] = '95p0'
     save_info               :   Optional[str] = False
     save_results            :   Optional[str] = False
 
