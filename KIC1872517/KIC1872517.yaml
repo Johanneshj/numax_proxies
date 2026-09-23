@@ -59,7 +59,7 @@ CONFIG:
   avg_psd_overlap: 0.99 # how many days each bin overlaps when generating the averaged PSD
   initial_numax: null # initial numax guess
   gap_size_days: 50.0 # gap size in days for close_gaps
-  results_directory: "numax_proxies/KIC1872517" # results directory
+  results_directory: "numax_proxies/results" # results directory
 
 ACF_CONFIG:
   ## ACF configuring parameters
