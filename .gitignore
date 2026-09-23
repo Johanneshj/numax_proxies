@@ -9,9 +9,7 @@ test.py
 stars/*
 results/*ppm
 .python-version
-results/_*
 _results/
-results/*
 FliPer_model.pkl
 proxies/EACF/
 proxies/FliPer/
