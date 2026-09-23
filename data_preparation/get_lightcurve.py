@@ -147,20 +147,20 @@ class GetLightcurve:
             self._flux_err = np.ones_like(self._flux) * 50
         return self
     
-    def lightcurve_from_feather_file(self):
-        """Load lc from .feather file"""
-        # with ipc.open_file(self._lc_file) as reader:
-        data = pd.read_feather(self._lc_file)
-        time_arr = data["time"].to_numpy()
-        flux_arr = data["flux"].to_numpy()
-        mask = (
-            ~np.isnan(time_arr)
-            & ~np.isnan(flux_arr)
-        )
-        self._time = time_arr[mask]
-        self._flux = flux_arr[mask]
-        self._flux_err = np.ones_like(self._flux) * np.nanstd(self._flux)
-        return mask
+    # def lightcurve_from_feather_file(self):
+    #     """Load lc from .feather file"""
+    #     # with ipc.open_file(self._lc_file) as reader:
+    #     data = pd.read_feather(self._lc_file)
+    #     time_arr = data["time"].to_numpy()
+    #     flux_arr = data["flux"].to_numpy()
+    #     mask = (
+    #         ~np.isnan(time_arr)
+    #         & ~np.isnan(flux_arr)
+    #     )
+    #     self._time = time_arr[mask]
+    #     self._flux = flux_arr[mask]
+    #     self._flux_err = np.ones_like(self._flux) * np.nanstd(self._flux)
+    #     return mask
 
     def lightcurve_from_parquet_file(self):
         """Load lc from .parquet file"""

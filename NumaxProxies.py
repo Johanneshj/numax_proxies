@@ -116,6 +116,7 @@ class NumaxProxies:
         end = t.time()
 
         print(f'CoV time: {np.round(end-start, 3)} seconds')
+        
     # def compute_numax_from_FliPer(self, plot=True):
     #     """
     #     Compute numax with method from Bugnet et al. (2018).
