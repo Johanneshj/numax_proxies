@@ -59,17 +59,17 @@ CONFIG:
   avg_psd_overlap: 0.99 # how many days each bin overlaps when generating the averaged PSD
   initial_numax: null # initial numax guess
   gap_size_days: 50.0 # gap size in days for close_gaps
-  results_directory: "numax_proxies/results" # results directory
+  results_directory: "numax_proxies/KIC1872517" # results directory
 
 ACF_CONFIG:
   ## ACF configuring parameters
   plot : true # Do ACF plot?
-  plot_log_scale : false
+  plot_log_scale : true
   sliding_window_style: "log_numax" # 'linear', 'logarithmic', or 'log_numax' (default)
   min_freq: 1 # minimum frequency considered in ACF
   max_freq: null # maximum frequency considered in ACF
-  overlap_scale: [4.0, 6.0, 8.0] # how much do bins overlap
-  width_factor: [0.1, 1.0, 1.5] # how wide are bins
+  overlap_scale: [4.0, 6.0, 8.0, 20] # how much do bins overlap
+  width_factor: [0.5, 1.0, 1.5, 2.0] # how wide are bins
   smoothing_factor: [0.5, 1.0, 1.5]
   max_acf_fit_iterations: 3 # iterations of ACF Gauss fit to optimize in terms of integral under envelope (maximum integral = correct numax)
   n_sigma_numax_acf: 2 # width of envelope for integral
@@ -80,11 +80,11 @@ ACF_CONFIG:
 COV_CONFIG:
   # CoV configuring parameters
   plot: true # Do CoV plot?
-  plot_log_scale: false
+  plot_log_scale: true
   min_freq: 1
   max_freq: null
-  overlap_scale: [4.0, 6.0, 8.0] # how much do bins overlap
-  width_factor: [1.0, 1.5] # how wide are bins
+  overlap_scale: [4.0, 6.0, 8.0, 20] # how much do bins overlap
+  width_factor: [0.5, 1.0, 1.5] # how wide are bins
   smoothing_factor: [0.5, 1.0, 1.5]
   use_welch: False # Experimental
   welch_seg_size: 90 # Experimental!
