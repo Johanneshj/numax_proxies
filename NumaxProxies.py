@@ -45,7 +45,7 @@ class NumaxProxies:
         """
         Compute νmax using the 2D autocorrelation proxy.
         """
-        # import matplotlib.pyplot as plt
+        print(self.acf_config)
         acf_proxy = NumaxFromACF(
             avg_psd = self.avg_psd if self.config.do_avg_psd else self.psd, # sometimes we don't want to use averaged psd
             acf_config = self.acf_config,
@@ -117,37 +117,6 @@ class NumaxProxies:
 
         print(f'CoV time: {np.round(end-start, 3)} seconds')
         
-    # def compute_numax_from_FliPer(self, plot=True):
-    #     """
-    #     Compute numax with method from Bugnet et al. (2018).
-
-    #     Input:
-    #         Noise estimate (usually done with magnitude, but we have to be a bit smarter)
-    #         Teff
-    #     """
-    #     gmag = self._mag
-    #     FliPer_proxy = NumaxFromFliPer(lc=self._lc, pg=self._pg, id=self._id, gmag=gmag)
-
-    #     numax = FliPer_proxy.compute()
-
-    #     if plot:
-    #         FliPer_proxy.plot()
-
-    #     self._numax_estimates["numax_FliPer"] = numax
-
-    # def compute_numax_from_EACF(self):
-    #     """Compute numax with method from Mosser & Appourchaux (2009) and I.W. Roxburgh (2009)"""
-    #     EACF_proxy = NumaxFromEACF(
-    #         star = self.star,
-    #         psd = self.avg_psd,
-    #         config = self.config,
-    #         eacf_config = self.eacf_config
-    #     )
-    #     EACF_proxy.compute()
-
-    #     if self.eacf_config.plot:
-    #         EACF_proxy.plot()
-
     def plotting(self):
         """
         Here we are going to plot the full spectrum with all numax estimates
@@ -285,7 +254,7 @@ class NumaxProxies:
             dp.plot_lc_and_pg()
 
         if self.config.save_psd:
-            dp.save_periodogram()
+            dp.save_periodogram(folder=self.config.results_directory)
 
         if self.config.save_avgpsd:
             dp.save_avg_periodogram()

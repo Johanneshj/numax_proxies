@@ -55,20 +55,16 @@ def calculate_two_dim_ACF(frequency : NDArray, power : NDArray, acf_config : ACF
         overlap_scales      =   acf_config.overlap_scale,
         min_freq            =   acf_config.min_freq,
         max_freq            =   acf_config.max_freq,
-        width_factors       =   acf_config.width_factor#,
-        # smoothing_factors   =   acf_config.smoothing_factor
+        width_factors       =   acf_config.width_factor
     )
 
-    # Calculate acf for each segment
-    # print(binned_data)
-    # print(binned_data.items())
     two_dim_acf_results = {}
     for param_key, data in binned_data.items():
-        # print(len(data["bin_centers"]), len(data["power_windows"]))
         acfs = abs_acf(data["power_windows"])# for pw in data["power_windows"]]
         
         two_dim_acf_results[param_key] = {
             "bin_centers": data["bin_centers"],
+            "N_data_points_in_bin": data["N_data_points_in_bin"],
             "freq_windows": data["freq_windows"],
             "acfs": acfs
         }
@@ -79,19 +75,13 @@ def calculate_two_dim_ACF(frequency : NDArray, power : NDArray, acf_config : ACF
     return two_dim_acf_results
 
 def log_numax_binning(
-        frequency : NDArray, 
-        power : NDArray, 
-        overlap_scales : Union[float, List[float]] = 6, 
-        min_freq : float = 100, 
-        max_freq : float = None, 
-        width_factors : Union[float, List[float]] = 1
-        # smoothing_factors : Union[float, List[float]] = 1
+        frequency       :   NDArray, 
+        power           :   NDArray, 
+        overlap_scales  :   Union[float, List[float]] = 6, 
+        min_freq        :   float = 100, 
+        max_freq        :   float = None, 
+        width_factors   :   Union[float, List[float]] = 1
 ) -> Dict[ParamKey, BinningResult]: 
-# -> tuple[
-#         list[np.ndarray],
-#         list[list[np.ndarray]],
-#         list[list[np.ndarray]],
-#     ]:   
     """
         Perform sliding window as used for CoV method in Viani+ 2019.
         Basically, around each bin center the bin size will be defined as
@@ -111,15 +101,8 @@ def log_numax_binning(
     scales = [float(overlap_scales)] if isinstance(overlap_scales, (int, float)) else [float(s) for s in overlap_scales]
     factors = [float(width_factors)] if isinstance(width_factors, (int, float)) else [float(w) for w in width_factors]
 
-    # Smoothing factors will only be used here to determine the dimensionality of the res_list
-    # smoothing_factors = ([float(smoothing_factors)] if isinstance(smoothing_factors, (int, float)) else [float(s) for s in smoothing_factors])
-
     if max_freq is None:
         max_freq = frequency[-1]
-
-    # bcs:    List[NDArray] = []
-    # fs:     List[NDArray] = []
-    # ps:     List[NDArray] = []
 
     results = {}
 
@@ -145,18 +128,21 @@ def log_numax_binning(
         # Calculate mean power within each bin
         freqs = []
         powers = []
+        N_data_points_in_bins = []
 
         # Calculate power in bin
         for center, width in zip(bin_centers, bin_widths):
             half_w = width / 2.0
             idx_start = np.searchsorted(frequency, center - half_w, side="left")
             idx_end = np.searchsorted(frequency, center + half_w, side="right")
-            
+
+            N_data_points_in_bins.append(len(frequency[idx_start:idx_end]))
             freqs.append(frequency[idx_start:idx_end])
             powers.append(power[idx_start:idx_end])
 
         results[(scale, factor)] = {
             "bin_centers": np.array(bin_centers),
+            "N_data_points_in_bin": N_data_points_in_bins,
             "freq_windows": freqs,
             "power_windows": powers
         }
@@ -180,9 +166,6 @@ def abs_acf(power_windows: list[np.ndarray]) -> list[np.ndarray]:
         
         # Center data
         x_centered = x - np.mean(x)
-
-        # Can we do more here to minimize spectral leakage
-        # x_centered *= hann(len(x_centered), sym=True)
 
         # Perform autocorrelation by means of FFT
         corr = correlate(x_centered, x_centered, mode='full', method='fft')
@@ -233,17 +216,16 @@ def smoothing_func(
         else [float(s) for s in smoothing_factors]
     )
 
-    # Empty list
-    all_smoothed = []
+    # Empty dictionary
     smoothed_results = {}
     # Smooth
-    bin_widths = 0.66 * bin_centers**0.88
+    bin_widths = 0.66 * (bin_centers ** 0.88)
 
     for factor in factors:
 
         smoothed = np.empty_like(collapsed_acf)
 
-        half_widths = factor * bin_widths / 2
+        half_widths = (factor * bin_widths) / 2.0
 
         lowers = bin_centers - half_widths
         uppers = bin_centers + half_widths
@@ -263,10 +245,8 @@ def smoothing_func(
     return smoothed_results
 
 def collapsed_acf(
-    # bin_centers:    list[NDArray],
-    # acfs:           list[NDArray],
-    two_dim_acf_results: Dict[Tuple[float, float], dict],
-    acf_config:     ACFConfig
+    two_dim_acf_results :   Dict[Tuple[float, float], dict],
+    acf_config          :   ACFConfig
 ) -> Dict[FullParamKey, Dict[str, NDArray]]:
 
     smoothing_factors = acf_config.smoothing_factor
@@ -289,6 +269,7 @@ def collapsed_acf(
             full_key = (overlap_scale, width_factor, smooth_factor)
             results[full_key] = {
                 "bin_centers": bcs,
+                "N_data_points_in_bin": data["N_data_points_in_bin"],
                 "cacf_raw": cacf_unsmoothed,
                 "cacf_smoothed": cacf_smoothed,
                 # "cacf_norm_smoothed": normalize_0_1(cacf_smoothed)

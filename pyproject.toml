@@ -21,11 +21,21 @@ dependencies = [
     "lightkurve>=2.4",
     "pandas>=2.2",
     "astropy>=6.0",
-    "finufft>=2.2",
+    "finufft>=2.5.1",
     "pyarrow>=25.0.0",
     "nifty-ls @ git+https://github.com/flatironinstitute/nifty-ls.git@main",
-    "SciencePlots"
+    "SciencePlots",
+    "fastparquet"
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
+# [tool.setuptools.packages.find]
+# where = ["."]
+
+[tool.setuptools]
+package-dir = { "numax_proxies" = "." }
+packages = [
+    "numax_proxies",
+    "numax_proxies.data_preparation",
+    "numax_proxies.plotting",
+    "numax_proxies.proxies",
+]

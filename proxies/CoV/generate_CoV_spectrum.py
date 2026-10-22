@@ -18,29 +18,25 @@ FullParamKey = Tuple[float, float, float] # (overlap_scale, width_factor, smooth
 def log_numax_binning(
         frequency : NDArray, 
         power : NDArray, 
+        overlap_scales : Union[float, List[float]] = 6, 
         min_freq : float = 100, 
         max_freq : float = None, 
-        overlap_scales : Union[float, List[float]] = 6, 
         width_factors : Union[float, List[float]] = 1
 ) -> Dict[ParamKey, BinningResult]: 
-
     """
         Perform sliding window as used for CoV method in Viani+ 2019.
         Basically, around each bin center the bin size will be defined as
         the width a potential delta_nu.
 
-        Parameters:
-            frequency       :   frequency array
-            power           :   power array
-            min_num_points  :   minimum number of points in a bin.
-            min_freq        :   minimum frequency (microHz) for first bin center.
-            overlap_scales  :   control how much overlap there is between bins.
-            width_factors   :   control width of bins
-        
-        Returns:
-            binning_results :   Dictionary with entries corresponding to each combination of 
-                                overlap_scale and width_factor.
-                                Each entry has bin_centers and power within bins.   
+        Inputs:
+            frequency       : frequency array
+            power           : power array
+            overlap_scale   : control how much overlap there is between bins
+                                and therebby the number of bins.
+            min_num_points  : minimum number of points in a bin.
+            min_freq        : minimum frequency (microHz) for first bin center.
+
+        The function "binning_parameters" returns overlap_scale, min_num_points, min_freq.
     """
     # Standardize inputs to lists
     scales = [float(overlap_scales)] if isinstance(overlap_scales, (int, float)) else [float(s) for s in overlap_scales]
@@ -49,7 +45,7 @@ def log_numax_binning(
     if max_freq is None:
         max_freq = frequency[-1]
 
-    binning_results = {}
+    results = {}
 
     # Loop of overlap scales and width factors
     for scale, factor in itertools.product(scales, factors):
@@ -73,22 +69,25 @@ def log_numax_binning(
         # Calculate mean power within each bin
         freqs = []
         powers = []
+        N_data_points_in_bins = []
 
         # Calculate power in bin
         for center, width in zip(bin_centers, bin_widths):
             half_w = width / 2.0
             idx_start = np.searchsorted(frequency, center - half_w, side="left")
             idx_end = np.searchsorted(frequency, center + half_w, side="right")
-            
+
+            N_data_points_in_bins.append(len(frequency[idx_start:idx_end]))
             freqs.append(frequency[idx_start:idx_end])
             powers.append(power[idx_start:idx_end])
 
-        binning_results[(scale, factor)] = {
+        results[(scale, factor)] = {
             "bin_centers": np.array(bin_centers),
+            "N_data_points_in_bin": N_data_points_in_bins,
             "freq_windows": freqs,
             "power_windows": powers
         }
-
+    binning_results = results
     return binning_results
 
 def calculate_CoVs(
@@ -254,7 +253,6 @@ def smooth_CoVs(
         - "bin_centers": 1D array of frequency bin centers
         - "cov": Raw 1D CoV array
         - "cov_smoothed": Smoothed 1D CoV array
-        - "cov_norm_smoothed": Min-max normalized smoothed CoV array [0, 1]
     """
     smoothing_factors = cov_config.smoothing_factor
     results = {}
@@ -275,8 +273,9 @@ def smooth_CoVs(
             full_key = (scale, width_factor, smooth_factor)
             results[full_key] = {
                 "bin_centers": bin_centers,
+                "N_data_points_in_bin": data["N_data_points_in_bin"],
                 "cov": cov_raw,
                 "cov_smoothed": cov_smoothed
             }
-
+        
     return results

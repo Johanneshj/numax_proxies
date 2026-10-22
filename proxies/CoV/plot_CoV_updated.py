@@ -11,6 +11,9 @@ def gaussian_with_offset(x: NDArray, A: float, sigma: float, mu: float) -> NDArr
     """Gaussian function with an offset of 1."""
     return 1.0 + A * np.exp(-((x - mu) ** 2) / (2.0 * sigma**2))
 
+def power_law(x : NDArray) -> NDArray:
+    return 2.69 * x ** 0.154
+
 def plot_CoV(
     cov_results: Dict[Tuple[float, ...], dict],
     initial_numax: Optional[float], 
@@ -21,18 +24,19 @@ def plot_CoV(
     """
     Plot CoVs, smoothed CoVs, FAPs, and Gaussian fits from the cov_results dictionary.
     """
+    n = 4
     for data in cov_results.values():
         bcs = np.asarray(data["bin_centers"])
         covs = np.asarray(data["cov"])
         scov = np.asarray(data["cov_smoothed"])
 
         # 1. Plot raw unsmoothed and smoothed CoV curves
-        ax.plot(bcs, covs, c='gray', alpha=0.3, zorder=-5)
-        ax.plot(bcs, scov, c='k', alpha=0.3, zorder=-4)
+        ax.plot(bcs, covs, c='gray', alpha=1/n, zorder=-5)
+        ax.plot(bcs, scov, c='k', alpha=1/n, zorder=-4)
 
         # 2. Plot FAP threshold if available
         if "fap" in data and data["fap"] is not None:
-            ax.plot(bcs, np.asarray(data["fap"]), c='green', alpha=0.3, zorder=-3)
+            ax.plot(bcs, np.asarray(data["fap"]), c='green', alpha=1/n, zorder=-3)
 
         # 3. Plot Gaussian fit if fitting parameters exist and are non-NaN
         fit_vals = data.get("fit_params")
@@ -50,8 +54,18 @@ def plot_CoV(
                 x = np.linspace(np.min(bcs), np.max(bcs), len(bcs) * 10)
                 fit_curve = gaussian_with_offset(x, amp_val, sigma_val, numax_val)
 
-                ax.plot(x, fit_curve, c="r", alpha=0.3, zorder=-2)
-                ax.axvline(numax_val, c="b", ls="--", alpha=0.3, zorder=-1)
+                ax.plot(x, fit_curve, c="r", alpha=1/n, zorder=-2)
+                ax.axvline(numax_val, c="b", ls="--", alpha=1/n, zorder=-1)
+    
+    x_for_upper_lim = np.linspace(0, 10000, 10000)
+    ax.fill_between(
+        x_for_upper_lim, 
+        power_law(x_for_upper_lim), 
+        50*np.ones_like(power_law(x_for_upper_lim)), 
+        color='orange', 
+        alpha=0.2, 
+        zorder=-6
+    )
 
     # Define custom legend handles
     legend_elements = [
@@ -60,6 +74,7 @@ def plot_CoV(
         Line2D([0], [0], color='green', alpha=1.0, label='FAP'),
         Line2D([0], [0], color='r', alpha=1.0, label='Gaussian fit'),
         Line2D([0], [0], color='b', ls='--', alpha=1.0, label=r'$\nu_\text{max}$ estimate'),
+        Line2D([0], [0], color='orange', ls='-', alpha=1.0, label='upper limit')
     ]
 
     if initial_numax and not np.isnan(initial_numax):
@@ -77,6 +92,11 @@ def plot_CoV(
     ax.set_ylabel("coefficient of variation")
 
     ax.set_xlim(min(bcs), max(bcs))
+
+    ax.set_ylim(
+        bottom=min(covs)*0.9, 
+        top=max(covs)*1.1
+    )
 
     if getattr(cov_config, "plot_log_scale", False):
         ax.set_xscale('log')

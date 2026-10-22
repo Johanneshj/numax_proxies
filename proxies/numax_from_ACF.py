@@ -74,10 +74,9 @@ class NumaxFromACF:
         # Evaluate FAP
         self.cacf_results = evaluate_faps(
             cacf_results    = self.cacf_results,
-            L               = np.max([np.min([self.length_timeseries, 2500]), 20]),
+            FAP_threshold   = self.acf_config.FAP_threshold
         )
-        # print(self.FAPs)
-        # print(len(self.bin_centers), len(self.unsmoothed_cacfs), len(self.smoothed_cacfs), len(self.FAPs))
+       
         # Fit gauss to estimate numax
         self.results = fit_gauss_global(
             cacf_results            = self.cacf_results, 

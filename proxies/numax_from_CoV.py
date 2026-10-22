@@ -75,9 +75,11 @@ class NumaxFromCoefficientsOfVariation:
         )        
 
         # Evaluate FAPs
+        # print(np.max([np.min([self.length_timeseries, 2000]), 20]))
+        print('CoV:', self.cov_config.FAP_threshold)
         self.CoVs = evaluate_faps(
             CoV_results = self.CoVs,
-            L           = np.max([np.min([self.length_timeseries, 2500]), 20]),
+            FAP_threshold   = self.cov_config.FAP_threshold
         )
 
         # Results

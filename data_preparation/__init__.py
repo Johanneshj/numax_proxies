@@ -2,7 +2,7 @@
 Data prepation utilities
 """
 
-from .averaged_psd import mean_psd
+# from ._averaged_psd import mean_psd
 from .add_noise import calculate_noise
 from .get_lightcurve import GetLightcurve
 from .data_processing import DataProcessing
@@ -10,7 +10,7 @@ from .prepare_data import read_json_file
 from .dataclasses import LightCurveData, LightCurveInput, PSDData, AvgPSDData, ProcessingConfig, StarInfo
 
 __all__ = [
-    "mean_psd",
+    # "mean_psd",
     "calculate_noise",
     "GetLightcurve",
     "DataProcessing",

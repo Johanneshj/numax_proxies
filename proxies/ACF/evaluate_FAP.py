@@ -1,86 +1,40 @@
-import json
 import numpy as np
 from typing import Dict, Tuple
-from numpy.typing import NDArray
 
 def evaluate_faps(
-    cacf_results: Dict[Tuple[float, ...], dict],
-    L: float,
-    filepath: str = "numax_proxies/proxies/ACF/ACF_FAP_fit_coefficients.txt",
-    c: float = 0.0,
+    cacf_results    :   Dict[Tuple[float, ...], dict],
+    FAP_threshold   =   '95p0',
 ) -> Dict[Tuple[float, ...], dict]:
-    """
-    Evaluates the FAP curve y(x) = a / (1 + exp(b * (x - c))) + d
-    by reading fitted surface parameters from a JSON/text file, and updates 
-    each sub-dictionary in cacf_results with a 'fap' entry.
+    """Evalute FAP based on white noise simulations as detailed in Jørgensen et al. 2026
 
-    Parameters:
-    -----------
-    cacf_results : dict
-        Dictionary keyed by (overlap_scale, width_factor, smoothing_factor) 
-        or (overlap_scale, width_factor), where each entry contains 'bin_centers'.
-    L : float
-        Timeseries length in days.
-    filepath : str
-        Path to the saved surface fit text/JSON file.
-    c : float
-        Shift parameter (default = 0.0).
-    use_log10_bcs : bool
-        If True, evaluates grid points x as log10(bin_centers) (default = True).
+    Args:
+        cacf_results (Dict[Tuple[float, ...], dict]): dictionary containing cacfs
+        FAP_threshold (str, optional): detection threshold ('99p0' or '99p0') Defaults to '95p0'.
 
     Returns:
-    --------
-    Dict[Tuple[float, ...], dict]
-        The updated cacf_results dictionary containing the 'fap' curve in each entry.
+        Dict[Tuple[float, ...], dict]: cacf_results dictionary updated with FAPs
     """
-    with open(filepath, "r") as f:
-        model_data = json.load(f)
-
-    degrees = model_data["degrees"]
-    coeffs = model_data["coefficients"]
-
-    logL = float(np.log10(L))
-
-    # Cache calculated (a, b, d) parameters per width_factor to avoid duplicate matrix ops
-    param_cache = {}
-
     for key, data in cacf_results.items():
-        # Extract width_factor from key tuple: (overlap_scale, width_factor, [smoothing_factor])
-        width_factor = float(key[1])
+        
+        Ns = [2**i for i in range(1, 16)]
 
-        # Evaluate 2D surface polynomial for this width_factor if not already in cache
-        if width_factor not in param_cache:
-            params = {}
-            for p in ["a", "b", "d"]:
-                deg = degrees[p]
-                c_vec = np.array(coeffs[p])
-                A = _build_poly2d_features(logL, width_factor, deg)
-                params[p] = float((A @ c_vec)[0])
-            param_cache[width_factor] = params
+        if FAP_threshold == '95p0':
+            FAP = [2.0246086, 1.8616644, 1.6811973, 1.536011, 1.4235336, 1.3377753, 1.2745201, 1.2286038, 1.1958502, 1.1726482, 1.1550456, 1.141837, 1.1322121, 1.1254695, 1.1216263]
+        elif FAP_threshold == '99p0':
+            FAP = [2.8355962, 2.4541499, 2.0761378, 1.7995098, 1.6005808, 1.4571139, 1.3558602, 1.2848162, 1.2354867, 1.2011936, 1.1754777, 1.156408, 1.1426409, 1.1330239, 1.1273699]
         else:
-            params = param_cache[width_factor]
+            # Fall back to 95th if wrong input
+            FAP = [2.0246086, 1.8616644, 1.6811973, 1.536011, 1.4235336, 1.3377753, 1.2745201, 1.2286038, 1.1958502, 1.1726482, 1.1550456, 1.141837, 1.1322121, 1.1254695, 1.1216263]
 
-        # Prepare x evaluation points (log10 of bin centers)
-        bin_centers = np.asarray(data["bin_centers"])
-        x_arr = np.log10(bin_centers)
+        N = np.array(data["N_data_points_in_bin"], dtype=float)
+        bc = np.asarray(data["bin_centers"], dtype=float)
 
-        # Evaluate logistic FAP curve
-        a, b, d = params["a"], params["b"], params["d"]
-        fap = a / (1.0 + np.exp(b * (x_arr - c))) + d
+        # Continue the trend of increasing bin sizes (actually bins get smaller towards the end of the spectrum)
+        dec = np.where(np.diff(N) < 0)[0]
+        if len(dec) > 0:
+            idx = dec[0] + 1
+            N[idx:] = N[idx - 1] * (bc[idx:] / bc[idx - 1]) ** 0.764
 
-        # Update dictionary entry in-place
-        data["fap"] = fap
+        data["fap"] = np.interp(np.log2(N), np.log2(Ns), FAP)
 
     return cacf_results
-
-def _build_poly2d_features(x, y, degree):
-    """Builds 2D polynomial features for logL (x) and W (y)."""
-    x_arr = np.atleast_1d(x)
-    y_arr = np.atleast_1d(y)
-
-    terms = []
-    for d in range(degree + 1):
-        for i in range(d + 1):
-            j = d - i
-            terms.append((x_arr**i) * (y_arr**j))
-    return np.column_stack(terms)

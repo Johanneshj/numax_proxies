@@ -39,7 +39,7 @@ CONFIG:
   
   # Flags
   normalize: True # normalize to ppm?
-  savgol: false # apply savgol filter?
+  savgol: True # apply savgol filter?
   query_gaia: False # query gaia for star data?
   do_avg_psd: False # compute average PSD and use for calculations?
   add_noise: False # add noise for testing?
@@ -66,14 +66,14 @@ ACF_CONFIG:
   plot : true # Do ACF plot?
   plot_log_scale : true
   sliding_window_style: "log_numax" # 'linear', 'logarithmic', or 'log_numax' (default)
-  min_freq: 1 # minimum frequency considered in ACF
+  min_freq: 10 # minimum frequency considered in ACF
   max_freq: null # maximum frequency considered in ACF
-  overlap_scale: [4.0, 6.0, 8.0, 20] # how much do bins overlap
+  overlap_scale: [4.0, 8.0, 16.0, 32.0] # how much do bins overlap
   width_factor: [0.5, 1.0, 1.5, 2.0] # how wide are bins
   smoothing_factor: [0.5, 1.0, 1.5]
   max_acf_fit_iterations: 3 # iterations of ACF Gauss fit to optimize in terms of integral under envelope (maximum integral = correct numax)
   n_sigma_numax_acf: 2 # width of envelope for integral
-  FAP_threshold: '95p0'
+  FAP_threshold: '99p0'
   save_info: true
   save_results: true
 
@@ -83,14 +83,14 @@ COV_CONFIG:
   plot_log_scale: true
   min_freq: 1
   max_freq: null
-  overlap_scale: [4.0, 6.0, 8.0, 20] # how much do bins overlap
-  width_factor: [0.5, 1.0, 1.5] # how wide are bins
+  overlap_scale: [4.0, 8.0, 16.0, 32.0] # how much do bins overlap
+  width_factor: [0.5, 1.0, 1.5, 2.0] # how wide are bins
   smoothing_factor: [0.5, 1.0, 1.5]
   use_welch: False # Experimental
   welch_seg_size: 90 # Experimental!
   use_linear_bins: False # Experimental
   use_Bell: false
-  FAP_threshold: '95p0' # Either '95p0', '99p0', or '99p9'
+  FAP_threshold: '99p0' # Either '95p0', '99p0', or '99p9'
   save_info: True
   save_results: True
 

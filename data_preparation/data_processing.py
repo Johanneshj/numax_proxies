@@ -122,78 +122,6 @@ class DataProcessing:
         self.nyq = np.max(self.frequency)
         return self
 
-    # ----------------------------
-    # Averaged PSD (Sylvain Breton)
-    # ----------------------------
-    # def averaged_psd(self, chunk_len=90):
-    #     """
-    #     Author: Sylvain Breton
-    #     email: sylvain.breton@inaf.it
-    #     Created: 22 Nov 2024
-    #     INAF-OACT
-
-    #     Compute mean PSD of a light curve, by subdividing it
-    #     into chunks of equal length. The light curve sampling
-    #     is assumed to be regular.
-
-    #     Parameters
-    #     ----------
-    #     param time: ndarray
-    #     Input time vector in days
-
-    #     param flux: ndarray
-    #     Input flux of the light curve in ppm
-
-    #     param len_chunk: float
-    #     Length of the chunks in days.
-    #     Optional, default 90
-
-    #     Returns
-    #     -------
-    #     tuple of arrays
-    #     A tuple with frequency and power spectral density
-    #     vectors.
-    #     """
-    #     time = self.time
-    #     flux = self.flux
-    #     flux_err = self.flux_err
-
-    #     dt = np.median(np.diff(time))
-    #     dt_sec = dt * 86400.0
-    #     df = 1 / (np.max(time)*86400.0)
-    #     len_chunk = chunk_len
-    #     if len_chunk >= np.max(time) / 2:
-    #         raise ValueError('chunk length for averaged PSD too long. Should be atleast 1/2 length of time series.')
-    #     size_chunk = int(len_chunk / dt)
-    #     n_chunk = len(time) // size_chunk
-
-    #     time = (
-    #         time[: size_chunk * n_chunk].reshape((n_chunk, size_chunk)) * 86400
-    #     )  # convert back to seconds
-    #     flux = flux[: size_chunk * n_chunk].reshape((n_chunk, size_chunk))
-    #     flux_err = flux_err[: size_chunk * n_chunk].reshape((n_chunk, size_chunk))
-
-    #     # Common frequency grid in Hz
-    #     freq_grid = np.arange(df / self.cfg.oversampling, 1/(2*dt_sec), df / self.cfg.oversampling)
-    #     # print(self.cfg.oversampling * df, 1/(2*dt_sec))
-    #     # freq, psd = self.calculate_psd_for_avg_psd(
-    #     #     time[0], flux[0], flux_err[0], freq_grid=None
-    #     # )
-
-    #     # PSD for each segment on common frequency grid
-    #     psd = [
-    #         self.calculate_psd_for_avg_psd(t_chunk, f_chunk, ferr_chunk, freq_grid=freq_grid)
-    #         for t_chunk, f_chunk, ferr_chunk in zip(time, flux, flux_err)
-    #     ]
-    #     # psd = sum(psd)
-
-    #     # psd /= n_chunk
-    #     psd_matrix = np.array(psd)  
-    #     psd = np.median(psd_matrix, axis=0, ddof=1)
-
-    #     self.avgpsd_freq = freq_grid * 1e6  # convert to microHz
-    #     self.avgpsd_power = psd
-    #     return self
 
     def averaged_psd(self, chunk_len=90, overlap=0.0):
             """
@@ -456,12 +384,15 @@ class DataProcessing:
         if id is None:
             id = self.id
         if folder is None:
-            folder = 'numax_proxies/results'
+            folder = f'numax_proxies/results'
         df = pd.DataFrame(
             np.column_stack((freq, power)), 
             columns=['frequency', 'power']
         )
-        df.to_feather(f"{folder}/PSD_{id}.csv")
+        if not os.path.exists(os.path.join(folder, id)):
+            os.mkdir(os.path.join(folder, id))
+
+        df.to_parquet(os.path.join(folder, id, f"PSD_{id}.parquet"))#f"{folder}/{id}/PSD_{id}.parquet")
 
     def save_avg_periodogram(self, folder=None, id=None):
         """Save frequency and power to .csv file"""
