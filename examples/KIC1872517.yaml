@@ -1,0 +1,95 @@
+# Example configuration: Kepler long-cadence red giant KIC 1872517 from its light curve.
+# Run from any folder:   python examples/run_example.py
+# Every key is optional; missing keys take the defaults shown here (see README).
+
+STAR:
+  target: KIC1872517          # used for output folder names (and Gaia / downloads)
+  cadence: null               # 'Kepler_SC' switches on the short-cadence cleaning by default
+  author: null                # lightkurve download only
+  quarter: null
+  sector: null
+  mission: null
+  # Stellar parameters for the scaling relations: lists, one entry per source,
+  # each with a matching *_err list
+  logg: null
+  logg_err: null
+  teff: null
+  teff_err: null
+  radius: null
+  radius_err: null
+  mass: null
+  mass_err: null
+  luminosity: null
+  luminosity_err: null
+  mag: null
+
+LIGHTCURVE:                   # used only when no PSD file is given
+  lc_file: KIC1872517/LC_KIC1872517.parquet   # relative to this YAML file
+  fits_file_folder: null
+
+PSD:                          # pre-computed spectra (frequency [muHz], power)
+  psd_file: null
+  avg_psd_file: null
+
+CONFIG:
+  normalize: true             # flux -> ppm
+  sort: true                  # sort, drop duplicates, start at t = 0
+  close_gaps: false
+  gap_size_days: 3.0
+  savgol: false               # subtract a Savitzky-Golay trend
+  savgol_window: 90.0         # days
+  add_noise: false
+  noise_std: 0.0              # ppm
+  oversampling: 1.0
+  width_for_wf: null
+  weight_psd_by_flux_err: false   # true = old normalisation, (flux/flux_err)^2
+  do_avg_psd: false
+  avg_psd_chunk: 90.0         # days
+  avg_psd_overlap: 0.0        # fraction of a chunk shared with the next one
+  avg_psd_method: median      # median or mean
+  clean_kepler_sc: null       # null: on for cadence Kepler_SC; true/false to force
+  query_gaia: false
+  initial_numax: null         # muHz; skips the automatic first guess
+  n_threads: null             # Numba threads; null = NUMBA_NUM_THREADS / all cores
+  random_seed: 42
+  plot_lc: true
+  save_lc: false
+  save_psd: false
+  save_avgpsd: false
+  save_results: true
+  results_directory: results_example   # relative to the working directory
+
+ACF_CONFIG:
+  min_freq: 1.0               # muHz
+  max_freq: null
+  overlap_scale: [1, 5, 10]   # bins per bin width
+  width_factor: [1, 5, 15]    # bin width in units of Delta-nu
+  smoothing_factor: [0.5, 1.0, 1.5]   # smoothing window in units of the envelope FWHM
+  median_filter_factor: 1.3862943611198906   # running-median window in envelope FWHM (2 ln 2)
+  replace_below_min_freq: true
+  FAP_threshold: '99p0'       # '95p0' or '99p0' (per bin)
+  collapse: all_lags          # all_lags or delta_nu
+  dnu_window: 0.1             # delta_nu: +- fraction of Delta-nu
+  dnu_multiples: [1.0]        # delta_nu: e.g. [0.5, 1, 2]
+  plot_2dacf: [5, 5]          # 2D ACF panel in ACF.png: false, true, or [overlap_scale, width_factor]
+  max_acf_fit_iterations: 1
+  n_sigma_numax_acf: 1
+  plot: true
+  plot_log_scale: false
+  save_info: true
+  save_results: true
+
+COV_CONFIG:
+  min_freq: 1.0
+  max_freq: null
+  overlap_scale: [1, 5, 10]
+  width_factor: [1, 5, 15]
+  smoothing_factor: [0.5, 1.0, 1.5]
+  median_filter_factor: 1.3862943611198906
+  replace_below_min_freq: true
+  FAP_threshold: '99p0'
+  use_fallback: true          # weighted-mean numax when no Gaussian fit is possible
+  plot: true
+  plot_log_scale: false
+  save_info: true
+  save_results: true

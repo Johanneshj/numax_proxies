@@ -1,17 +1,10 @@
 __pycache__/
-tool.ipynb
 *.egg-info/
-test.ipynb
 build/
 dist/
-test_jannsen*
-test.py
-stars/*
-results/*ppm
+.pytest_cache/
+*.ipynb
 .python-version
-_results/
-FliPer_model.pkl
-proxies/EACF/
-proxies/FliPer/
-proxies/numax_from_FliPer.py
-proxies/numax_from_EACF.py
+# outputs
+results/
+results_*/
