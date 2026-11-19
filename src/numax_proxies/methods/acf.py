@@ -77,15 +77,18 @@ def cacf_in_windows(power, idx_start, idx_end):
 def cacf_delta_nu_in_windows(power, idx_start, idx_end, k_lo, k_hi):
     """Collapsed ACF ('delta_nu') of every bin and its white-noise mean and sd.
 
-    Statistic: mean of r(k) = ACF(k) / ACF(0) over k_lo[i, m] <= k <= k_hi[i, m].
+    Statistic: mean over the bands m of the band mean of r(k) = ACF(k) / ACF(0) over
+    k_lo[i, m] <= k <= k_hi[i, m]; every band that fits in the bin has equal weight.
+    White noise: E r(k) = -(n-k)/n^2, Var r(k) = (n-k)/n^2, lags conditioned on the sum
+    rule sum_{k>=1} r(k) = -1/2 (Var S = sum a_k^2 Var r_k - mean^2 2n/(n-1)).
 
     Args:
         power: relative power.
         idx_start, idx_end: bin i covers power[idx_start[i]:idx_end[i]].
-        k_lo, k_hi: (n_bins, n_multiples) lag ranges in frequency points.
+        k_lo, k_hi: (n_bins, n_bands) lag ranges in frequency points (not overlapping).
 
     Returns:
-        (statistic, null_mean, null_sd) per bin; NaN where the bin has no lag in range.
+        (statistic, null_mean, null_sd) per bin; NaN where no band fits in the bin.
     """
     n_windows = len(idx_start)
     stat = np.full(n_windows, np.nan)
@@ -104,38 +107,50 @@ def cacf_delta_nu_in_windows(power, idx_start, idx_end, k_lo, k_hi):
         c0 = corr[0]
         if not c0 > 0.0:
             continue
-        total, mean0, var0, count = 0.0, 0.0, 0.0, 0
+        total, mean0, var0, n_bands = 0.0, 0.0, 0.0, 0
         for m in range(k_lo.shape[1]):
             lo = max(1, k_lo[i, m])
             hi = min(n - 1, k_hi[i, m])
+            if hi < lo:                                         # band beyond the bin
+                continue
+            b_tot, b_mean, b_var, count = 0.0, 0.0, 0.0, 0
             for k in range(lo, hi + 1):
-                total += corr[k] / c0
-                mean0 -= (n - k) / (n * n)
-                var0 += (n - k) / (n * n)
+                b_tot += corr[k] / c0
+                b_mean -= (n - k) / (n * n)
+                b_var += (n - k) / (n * n)
                 count += 1
-        if count > 0:
-            stat[i] = total / count
-            null_mean[i] = mean0 / count
-            null_sd[i] = np.sqrt(var0) / count
+            total += b_tot / count                              # band means, equal weights
+            mean0 += b_mean / count
+            var0 += b_var / (count * count)
+            n_bands += 1
+        if n_bands > 0:
+            stat[i] = total / n_bands
+            null_mean[i] = mean0 / n_bands
+            # sum rule sum_{k>=1} r(k) = -1/2: condition the lags on it
+            var = var0 / (n_bands * n_bands) - null_mean[i] ** 2 * 2.0 * n / (n - 1)
+            null_sd[i] = np.sqrt(var) if var > 0 else np.nan
     return stat, null_mean, null_sd
 
 
 def delta_nu_lag_ranges(centres, frequency, window, multiples):
-    """Lag ranges within +- window of m x Delta-nu(bin centre).
+    """Lag bands within +- window x m x Delta-nu(bin centre) of m x Delta-nu.
+
+    Bands that would overlap are trimmed so that no lag is in two bands.
 
     Args:
         centres: bin centres [muHz].
         frequency: frequency grid [muHz] (uniform).
-        window: half-width as a fraction of Delta-nu.
-        multiples: multiples m of Delta-nu.
+        window: half-width as a fraction of m x Delta-nu.
+        multiples: multiples m of Delta-nu (ascending).
 
     Returns:
-        (k_lo, k_hi), each (n_bins, n_multiples), in frequency points.
+        (k_lo, k_hi), each (n_bins, n_bands), in frequency points.
     """
     df = frequency[1] - frequency[0]
-    dnu = delta_nu(centres)[:, None] * np.asarray(multiples, dtype=float)[None, :]
+    dnu = delta_nu(centres)[:, None] * np.sort(np.asarray(multiples, dtype=float))[None, :]
     k_lo = np.ceil(dnu * (1 - window) / df).astype(np.int64)
     k_hi = np.floor(dnu * (1 + window) / df).astype(np.int64)
+    k_hi[:, :-1] = np.minimum(k_hi[:, :-1], k_lo[:, 1:] - 1)      # no shared lags
     return np.ascontiguousarray(k_lo), np.ascontiguousarray(k_hi)
 
 

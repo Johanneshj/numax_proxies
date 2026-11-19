@@ -120,12 +120,13 @@ Bins follow the expected large separation, Δν(ν) = 0.267 ν<sup>0.764</sup> (
   * `all_lags` (default): mean |r(k)| over all lags 1 … n−1 (Viani's MCC) minus μ<sub>0</sub>(n).
     For white noise mean |r| ≈ 0.53/√n; μ<sub>0</sub>(n) is taken from the simulations behind the
     FAP tables.
-  * `delta_nu`: r(k), signed, averaged over the lags within ±`dnu_window` of
-    m·Δν(ν<sub>c</sub>) for each m in `dnu_multiples` (how strongly the spectrum repeats at the
-    Δν expected if ν<sub>max</sub> were at the bin centre), minus its white-noise mean. For
-    white noise r(k) has mean −(n−k)/n² and variance (n−k)/n², lags ~independent, so mean
-    and threshold are analytic (threshold z·σ). Bins must be wider than
-    (1 + `dnu_window`)·max(m) Δν.
+  * `delta_nu`: r(k), signed, averaged over the lags within ±`dnu_window`·m·Δν(ν<sub>c</sub>) of
+    m·Δν(ν<sub>c</sub>) (how strongly the spectrum repeats at the Δν expected if ν<sub>max</sub>
+    were at the bin centre), minus its white-noise mean. One band per m in `dnu_multiples`
+    (default [1]); `dnu_bands: B` uses all bands m = 0.5, 1, …, 0.5 B (the ridges spaced Δν/2 in
+    the 2D ACF). Each band's mean has equal weight; bands that would overlap are trimmed, bands
+    beyond a bin are skipped. For white noise r(k) has mean −(n−k)/n² and variance (n−k)/n²,
+    and the lags obey Σ<sub>k≥1</sub> r(k) = −½; mean and threshold are analytic (threshold z·σ).
 
 ### 5. Smoothing
 Running mean of the binned curve over `smoothing_factor` × envelope FWHM.
@@ -162,16 +163,17 @@ The error is the median of the formal fit errors, which are too small.
 
 ## Example figures
 
-ACF (`collapse: delta_nu`, with the 2D ACF panel, `plot_2dacf: [10, 5]`) and CoV of a red
+ACF (default `collapse: all_lags`, with the 2D ACF panel, `plot_2dacf: [10, 5]`) and CoV of a red
 giant and a main-sequence star, for widths 3, 5, 10, overlaps 5, 10 and smoothing factors
 0.5, 1, 1.5, with `significance_at_numax: true`. Each line is one grid setting; dashed lines are the fitted ν<sub>max</sub>.
-In the 2D ACF, red is correlated, white is white noise and black is anticorrelated; the
-dotted lines are the `delta_nu` lag window (1 ± `dnu_window`) Δν(ν<sub>c</sub>).
+In the 2D ACF, green is correlated, black is white noise and purple is anticorrelated; for
+`all_lags` the lag axis is in µHz (for `delta_nu` in units of Δν(ν<sub>c</sub>), with the lag
+bands dotted).
 
 | | ACF | CoV |
 |---|---|---|
-| **Red giant**, KIC 11612603 (APOKASC-3 ν<sub>max</sub> = 86.0 µHz; ACF 91.1, CoV 87.4) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) |
-| **Main sequence**, KIC 6671492 (Sayeed et al. ν<sub>max</sub> = 728 µHz; ACF 770, CoV 699) | ![MS ACF](docs/figures/MS_ACF.png) | ![MS CoV](docs/figures/MS_CoV.png) |
+| **Red giant**, KIC 11612603 (APOKASC-3 ν<sub>max</sub> = 86.0 µHz; ACF 95.1, CoV 87.4) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) |
+| **Main sequence**, KIC 6671492 (Sayeed et al. ν<sub>max</sub> = 728 µHz; ACF 767, CoV 699) | ![MS ACF](docs/figures/MS_ACF.png) | ![MS CoV](docs/figures/MS_CoV.png) |
 
 ## Configuration reference
 
@@ -223,7 +225,8 @@ Relative input paths are resolved relative to the YAML file. See
 | replace_below_min_freq | true | white noise below min_freq |
 | FAP_threshold | 95p0 | 95p0 or 99p0 (per bin) |
 | collapse | all_lags | ACF only: `all_lags` or `delta_nu` |
-| dnu_window, dnu_multiples | 0.1, [1] | ACF `delta_nu`: lag window (fraction of Δν), multiples of Δν |
+| dnu_window, dnu_multiples | 0.1, [1] | ACF `delta_nu`: lag window (fraction of m·Δν), multiples m of Δν |
+| dnu_bands | null | ACF `delta_nu`: B → bands at m = 0.5, 1, …, 0.5 B (overrides `dnu_multiples`) |
 | plot_2dacf | false | ACF only: 2D ACF panel in ACF.png (lag vs bin centre; lag in Δν(ν<sub>c</sub>) for `delta_nu`, in µHz for `all_lags`); `true` = first grid setting, or `[overlap_scale, width_factor]` |
 | significance_at_numax | false | true: a significant bin must lie within 1 FWHM of the fitted numax |
 | plot, plot_log_scale | false | figures |

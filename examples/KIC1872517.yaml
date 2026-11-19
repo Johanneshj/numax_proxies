@@ -71,6 +71,7 @@ ACF_CONFIG:
   collapse: all_lags          # all_lags or delta_nu
   dnu_window: 0.1             # delta_nu: +- fraction of Delta-nu
   dnu_multiples: [1.0]        # delta_nu: e.g. [0.5, 1, 2]
+  dnu_bands: null             # delta_nu: B -> bands at 0.5, 1, ..., 0.5 B (overrides dnu_multiples)
   plot_2dacf: [5, 5]          # 2D ACF panel in ACF.png: false, true, or [overlap_scale, width_factor]
   max_acf_fit_iterations: 1
   n_sigma_numax_acf: 1

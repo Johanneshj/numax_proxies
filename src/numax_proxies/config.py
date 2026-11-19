@@ -152,6 +152,8 @@ class ACFConfig(_MethodConfig):
     collapse: Literal["all_lags", "delta_nu"] = "all_lags"   # how each bin's ACF becomes one number
     dnu_window: float = 0.1                 # delta_nu: half-width of the lag window, fraction of Delta-nu
     dnu_multiples: list[float] = field(default_factory=lambda: [1.0])  # delta_nu: lags at m x Delta-nu
+    dnu_bands: Optional[int] = None         # delta_nu: B -> bands at m = 0.5, 1.0, ..., 0.5 B
+                                            # (overrides dnu_multiples); bands beyond a bin are skipped
     plot_2dacf: Union[bool, list] = False   # 2D ACF panel in ACF.png: true (first grid
                                             # setting) or [overlap_scale, width_factor]
     max_acf_fit_iterations: int = 1         # successive Gaussian fits; keeps the largest integral
@@ -162,16 +164,21 @@ class ACFConfig(_MethodConfig):
         super().__post_init__()
         if self.collapse not in ("all_lags", "delta_nu"):
             raise ValueError("ACF_CONFIG.collapse must be 'all_lags' or 'delta_nu'")
-        self.dnu_multiples = [float(m) for m in np.atleast_1d(self.dnu_multiples)]
+        if self.dnu_bands is not None:
+            if int(self.dnu_bands) != self.dnu_bands or self.dnu_bands < 1:
+                raise ValueError("dnu_bands must be a positive integer")
+            self.dnu_bands = int(self.dnu_bands)
+            self.dnu_multiples = [0.5 * b for b in range(1, self.dnu_bands + 1)]
+        self.dnu_multiples = sorted(float(m) for m in np.atleast_1d(self.dnu_multiples))
         if not 0 < self.dnu_window < 1 or any(m <= 0 for m in self.dnu_multiples):
             raise ValueError("dnu_window must be in (0, 1) and dnu_multiples positive")
         if self.collapse == "delta_nu":
-            needed = (1 + self.dnu_window) * max(self.dnu_multiples)
+            needed = (1 + self.dnu_window) * min(self.dnu_multiples)
             too_narrow = [w for w in self.width_factor if w <= needed]
             if too_narrow:
                 warnings.warn(f"ACF collapse 'delta_nu': width_factor {too_narrow} <= {needed:.2f} "
-                              "is narrower than the lag window; those bins give only partial or "
-                              "no lags (NaN)", stacklevel=2)
+                              "is narrower than the first lag band; those bins give NaN",
+                              stacklevel=2)
         if not isinstance(self.plot_2dacf, bool):
             pair = [float(v) for v in np.atleast_1d(self.plot_2dacf)]
             if len(pair) != 2:

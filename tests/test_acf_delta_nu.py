@@ -45,7 +45,7 @@ def test_config_checks():
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         config_from_dict({"ACF_CONFIG": {"collapse": "delta_nu", "width_factor": [1, 5]}})
-    assert any("narrower than the lag window" in str(x.message) for x in w)
+    assert any("narrower than the first lag band" in str(x.message) for x in w)
     with pytest.raises(ValueError):
         config_from_dict({"ACF_CONFIG": {"collapse": "sum"}})
 
@@ -61,3 +61,28 @@ def test_plot_with_2dacf(tmp_path):
     assert list(tmp_path.rglob("ACF.png"))
     with pytest.raises(ValueError):
         config_from_dict({"ACF_CONFIG": {"plot_2dacf": [5]}})
+
+
+def test_dnu_bands_expand_and_do_not_overlap(kepler_grid):
+    cfg = config_from_dict({"ACF_CONFIG": {"collapse": "delta_nu", "dnu_bands": 8,
+                                           "width_factor": [5]}}).acf_config
+    assert cfg.dnu_multiples == [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    centres, _, _ = log_numax_bins(kepler_grid, 20.0, None, 5.0, 5.0)
+    k_lo, k_hi = delta_nu_lag_ranges(centres, kepler_grid, 0.1, cfg.dnu_multiples)
+    assert np.all(k_hi[:, :-1] < k_lo[:, 1:])                  # no lag in two bands
+
+
+def test_white_noise_calibration_with_bands(rng):
+    """With several bands, (stat - null_mean) / null_sd is still ~ N(0, 1)."""
+    f = kepler_lc_grid()
+    z_all = []
+    for _ in range(60):
+        x = rng.exponential(size=f.size) / np.log(2) - 1
+        centres, i0, i1 = log_numax_bins(f, 5.0, None, 5.0, 1.0)
+        k_lo, k_hi = delta_nu_lag_ranges(centres, f, 0.1, [0.5 * b for b in range(1, 9)])
+        stat, mu, sd = cacf_delta_nu_in_windows(x, i0, i1, k_lo, k_hi)
+        ok = np.isfinite(stat)
+        z_all.append((stat[ok] - mu[ok]) / sd[ok])
+    z = np.concatenate(z_all)
+    assert abs(np.mean(z)) < 0.1
+    assert abs(np.std(z) - 1) < 0.1
