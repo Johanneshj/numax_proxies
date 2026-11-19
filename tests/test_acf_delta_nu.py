@@ -86,3 +86,22 @@ def test_white_noise_calibration_with_bands(rng):
     z = np.concatenate(z_all)
     assert abs(np.mean(z)) < 0.1
     assert abs(np.std(z) - 1) < 0.1
+
+
+def test_fixed_bands_have_equal_width(kepler_grid):
+    """dnu_window_mode 'fixed': every band is m +- window Delta-nu wide, never overlapping."""
+    from numax_proxies.methods.acf import band_edges
+
+    lo, hi = band_edges([0.5, 1.0, 1.5, 4.0], 0.1, "fixed")
+    np.testing.assert_allclose(hi - lo, 0.2)
+    np.testing.assert_allclose(lo, [0.4, 0.9, 1.4, 3.9])
+    centres, _, _ = log_numax_bins(kepler_grid, 20.0, None, 5.0, 5.0)
+    k_lo, k_hi = delta_nu_lag_ranges(centres, kepler_grid, 0.1, [0.5 * b for b in range(1, 9)], "fixed")
+    width = k_hi - k_lo
+    assert np.all(np.abs(width - width[:, :1]) <= 1)            # same width for every band
+    assert np.all(k_hi[:, :-1] < k_lo[:, 1:])
+    with pytest.raises(ValueError):
+        config_from_dict({"ACF_CONFIG": {"dnu_window_mode": "absolute"}})
+    with pytest.raises(ValueError):                              # window wider than the first band
+        config_from_dict({"ACF_CONFIG": {"dnu_window_mode": "fixed", "dnu_window": 0.6,
+                                         "dnu_bands": 2}})

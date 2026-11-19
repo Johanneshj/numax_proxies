@@ -69,7 +69,8 @@ ACF_CONFIG:
   replace_below_min_freq: true
   FAP_threshold: '99p0'       # '95p0' or '99p0' (per bin)
   collapse: all_lags          # all_lags or delta_nu
-  dnu_window: 0.1             # delta_nu: +- fraction of Delta-nu
+  dnu_window: 0.1             # delta_nu: band half-width (see dnu_window_mode)
+  dnu_window_mode: relative   # relative: (1 +- w) m Delta-nu; fixed: (m +- w) Delta-nu
   dnu_multiples: [1.0]        # delta_nu: e.g. [0.5, 1, 2]
   dnu_bands: null             # delta_nu: B -> bands at 0.5, 1, ..., 0.5 B (overrides dnu_multiples)
   plot_2dacf: [5, 5]          # 2D ACF panel in ACF.png: false, true, or [overlap_scale, width_factor]

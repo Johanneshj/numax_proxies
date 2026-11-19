@@ -132,24 +132,43 @@ def cacf_delta_nu_in_windows(power, idx_start, idx_end, k_lo, k_hi):
     return stat, null_mean, null_sd
 
 
-def delta_nu_lag_ranges(centres, frequency, window, multiples):
-    """Lag bands within +- window x m x Delta-nu(bin centre) of m x Delta-nu.
+def band_edges(multiples, window, mode="relative"):
+    """Lower and upper edge of every lag band, in units of Delta-nu(bin centre).
+
+    Args:
+        multiples: multiples m of Delta-nu.
+        window: half-width; fraction of m x Delta-nu ("relative") or of Delta-nu ("fixed").
+        mode: "relative" -> (1 -+ window) m; "fixed" -> m -+ window.
+
+    Returns:
+        (lo, hi) arrays, sorted by m, before trimming of overlaps.
+    """
+    m = np.sort(np.asarray(multiples, dtype=float))
+    if mode == "fixed":
+        return m - window, m + window
+    return m * (1 - window), m * (1 + window)
+
+
+def delta_nu_lag_ranges(centres, frequency, window, multiples, mode="relative"):
+    """Lag bands around m x Delta-nu(bin centre), in frequency points.
 
     Bands that would overlap are trimmed so that no lag is in two bands.
 
     Args:
         centres: bin centres [muHz].
         frequency: frequency grid [muHz] (uniform).
-        window: half-width as a fraction of m x Delta-nu.
-        multiples: multiples m of Delta-nu (ascending).
+        window: half-width; fraction of m x Delta-nu ("relative") or of Delta-nu ("fixed").
+        multiples: multiples m of Delta-nu.
+        mode: "relative" or "fixed" (see band_edges).
 
     Returns:
-        (k_lo, k_hi), each (n_bins, n_bands), in frequency points.
+        (k_lo, k_hi), each (n_bins, n_bands).
     """
     df = frequency[1] - frequency[0]
-    dnu = delta_nu(centres)[:, None] * np.sort(np.asarray(multiples, dtype=float))[None, :]
-    k_lo = np.ceil(dnu * (1 - window) / df).astype(np.int64)
-    k_hi = np.floor(dnu * (1 + window) / df).astype(np.int64)
+    lo, hi = band_edges(multiples, window, mode)
+    dnu = delta_nu(centres)[:, None]
+    k_lo = np.ceil(dnu * lo[None, :] / df).astype(np.int64)
+    k_hi = np.floor(dnu * hi[None, :] / df).astype(np.int64)
     k_hi[:, :-1] = np.minimum(k_hi[:, :-1], k_lo[:, 1:] - 1)      # no shared lags
     return np.ascontiguousarray(k_lo), np.ascontiguousarray(k_hi)
 
@@ -236,7 +255,7 @@ def calculate_cacf(frequency, rel_power, cfg) -> dict:
                 extra = {"noise_mean": noise_mean}
             else:
                 k_lo, k_hi = delta_nu_lag_ranges(centres, frequency, cfg.dnu_window,
-                                                 cfg.dnu_multiples)
+                                                 cfg.dnu_multiples, cfg.dnu_window_mode)
                 stat, noise_mean, null_sd = cacf_delta_nu_in_windows(rel_power, i0, i1, k_lo, k_hi)
                 raw = stat - noise_mean
                 extra = {"noise_mean": noise_mean, "null_sd": null_sd}

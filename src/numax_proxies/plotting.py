@@ -65,15 +65,14 @@ def _acf_map_setting(cfg, results):
     return tuple(cfg.plot_2dacf)
 
 
-# anticorrelated purple, white noise black, correlated green
-ACF_MAP_CMAP = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "purple_black_green", ["#c77dff", "black", "#57e389"])
+# anticorrelated blue, white noise white, correlated red
+ACF_MAP_CMAP = "bwr"
 
 
 def plot_acf_map(ax, method):
     """Draw the 2D ACF of one grid setting into ax.
 
-    Colour: r(k) / white-noise sd, purple = anticorrelated, black = noise, green = correlated.
+    Colour: r(k) / white-noise sd, blue = anticorrelated, white = noise, red = correlated.
     Lag axis: units of Delta-nu(bin centre) for collapse delta_nu, muHz for all_lags.
 
     Args:
@@ -94,14 +93,12 @@ def plot_acf_map(ax, method):
     ax.pcolormesh(centres, lags, z, shading="nearest", cmap=ACF_MAP_CMAP, vmin=-4, vmax=4,
                   rasterized=True)
     if in_dnu:
-        ms = sorted(cfg.dnu_multiples)
-        for j, m in enumerate(ms):
-            hi = m * (1 + cfg.dnu_window)
-            if j + 1 < len(ms):                                  # trimmed like the lag bands
-                hi = min(hi, ms[j + 1] * (1 - cfg.dnu_window))
-            for edge in (m * (1 - cfg.dnu_window), hi):
-                if edge < factor:
-                    ax.axhline(edge, c="w", ls=":", lw=0.8)
+        from .methods.acf import band_edges
+        lo, hi = band_edges(cfg.dnu_multiples, cfg.dnu_window, cfg.dnu_window_mode)
+        hi[:-1] = np.minimum(hi[:-1], lo[1:])                    # trimmed like the lag bands
+        for edge in np.concatenate([lo, hi]):
+            if edge < factor:
+                ax.axhline(edge, c="k", ls=":", lw=0.8)
         ax.set(ylabel=r"lag [$\Delta\nu(\nu_c)$]", ylim=(0, factor))
     else:
         ax.set(ylabel=r"lag [$\mu$Hz]", ylim=(0, lags[-1]))

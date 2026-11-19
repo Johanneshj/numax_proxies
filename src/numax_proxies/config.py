@@ -150,7 +150,9 @@ class _MethodConfig:
 class ACFConfig(_MethodConfig):
     """ACF method."""
     collapse: Literal["all_lags", "delta_nu"] = "all_lags"   # how each bin's ACF becomes one number
-    dnu_window: float = 0.1                 # delta_nu: half-width of the lag window, fraction of Delta-nu
+    dnu_window: float = 0.1                 # delta_nu: half-width of each lag band (see dnu_window_mode)
+    dnu_window_mode: Literal["relative", "fixed"] = "relative"   # relative: (1 +- w) m Delta-nu;
+                                            # fixed: (m +- w) Delta-nu, the same width for every band
     dnu_multiples: list[float] = field(default_factory=lambda: [1.0])  # delta_nu: lags at m x Delta-nu
     dnu_bands: Optional[int] = None         # delta_nu: B -> bands at m = 0.5, 1.0, ..., 0.5 B
                                             # (overrides dnu_multiples); bands beyond a bin are skipped
@@ -172,8 +174,13 @@ class ACFConfig(_MethodConfig):
         self.dnu_multiples = sorted(float(m) for m in np.atleast_1d(self.dnu_multiples))
         if not 0 < self.dnu_window < 1 or any(m <= 0 for m in self.dnu_multiples):
             raise ValueError("dnu_window must be in (0, 1) and dnu_multiples positive")
+        if self.dnu_window_mode not in ("relative", "fixed"):
+            raise ValueError("dnu_window_mode must be 'relative' or 'fixed'")
+        if self.dnu_window_mode == "fixed" and self.dnu_window >= min(self.dnu_multiples):
+            raise ValueError("dnu_window_mode 'fixed': dnu_window must be < the smallest multiple")
         if self.collapse == "delta_nu":
-            needed = (1 + self.dnu_window) * min(self.dnu_multiples)
+            needed = (min(self.dnu_multiples) + self.dnu_window if self.dnu_window_mode == "fixed"
+                      else (1 + self.dnu_window) * min(self.dnu_multiples))
             too_narrow = [w for w in self.width_factor if w <= needed]
             if too_narrow:
                 warnings.warn(f"ACF collapse 'delta_nu': width_factor {too_narrow} <= {needed:.2f} "
