@@ -4,12 +4,12 @@ Steps, for every (overlap_scale, width_factor) on the grid:
   1. relative power  (P - median) / median, with a running median over
      median_filter_factor x envelope FWHM
   2. bins of width_factor x Delta-nu(nu), overlap_scale bins per bin width
-  3. per bin, ACF of the centred relative power, normalised by the bin's variance
+  3. per bin, autocorrelation r(k) = ACF(k) / ACF(0) of the centred relative power
      (regularity within the bin, not its variance), collapsed to one number
-     (ACF_CONFIG.collapse):
-       all_lags : mean |ACF(k)| / sqrt(n) / (ACF(0) / n) over all lags 1..n-1
-       delta_nu : mean ACF(k) / ACF(0) over the lags within +-dnu_window of
-                  m x Delta-nu(bin centre), m in dnu_multiples (signed; analytic FAP)
+     (ACF_CONFIG.collapse) minus its white-noise mean:
+       all_lags : mean |r(k)| over all lags 1..n-1 (MCC) - mu0(n)   (mu0 from simulations)
+       delta_nu : mean r(k) over the lags within +-dnu_window of m x Delta-nu(bin centre),
+                  m in dnu_multiples, - its analytic white-noise mean
   4. smoothing over smoothing_factor x envelope FWHM (one curve per smoothing factor)
   5. significance: raw CACF compared with a per-bin FAP threshold
   6. Gaussian fit to the smoothed CACF -> numax
@@ -32,7 +32,7 @@ from ..binning import (as_float_list, log_numax_bins, replace_below_min_freq, ru
                        smooth_over_envelope)
 from ..fitting import FWHM_TO_SIGMA, gaussian
 from ..seismic import delta_nu, envelope_fwhm
-from ..significance import add_faps, significant_near
+from ..significance import acf_noise_mean, add_faps, significant_near
 from ..threads import numba_threads
 from .common import median_estimate, save_numax_estimates, save_pickle
 
@@ -44,16 +44,16 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------------------
 @njit(cache=True, parallel=True)
 def cacf_in_windows(power, idx_start, idx_end):
-    """Collapsed ACF ('all_lags') of every bin.
+    """Mean absolute autocorrelation (MCC) of every bin.
 
-    Statistic: mean_{k=1..n-1} |ACF(k)| / sqrt(n) / (ACF(0) / n), ACF of the centred power.
+    Statistic: mean_{k=1..n-1} |r(k)|, r(k) = ACF(k) / ACF(0) of the centred power.
 
     Args:
         power: relative power.
         idx_start, idx_end: bin i covers power[idx_start[i]:idx_end[i]].
 
     Returns:
-        Statistic per bin (NaN for bins with < 2 points or zero variance).
+        MCC per bin (NaN for bins with < 2 points or zero variance).
     """
     n_windows = len(idx_start)
     results = np.full(n_windows, np.nan)
@@ -67,10 +67,9 @@ def cacf_in_windows(power, idx_start, idx_end):
         nfft = scipy.fft.next_fast_len(2 * n - 1)               # zero-padded: linear ACF
         spectrum = scipy.fft.rfft(x_centered, n=nfft, workers=1)
         corr = scipy.fft.irfft(spectrum * np.conjugate(spectrum), n=nfft, workers=1)
-        variance = corr[0] / n
-        if variance <= 0.0:                                     # constant window
+        if corr[0] <= 0.0:                                      # constant window
             continue
-        results[i] = np.mean(np.abs(corr[1:n])) / np.sqrt(n) / variance
+        results[i] = np.mean(np.abs(corr[1:n])) / corr[0]
     return results
 
 
@@ -140,7 +139,8 @@ def delta_nu_lag_ranges(centres, frequency, window, multiples):
     return np.ascontiguousarray(k_lo), np.ascontiguousarray(k_hi)
 
 
-def acf_map(frequency, rel_power, centres, idx_start, idx_end, n_lag: int = 300):
+def acf_map(frequency, rel_power, centres, idx_start, idx_end, n_lag: int = 300,
+            lag_unit: str = "dnu"):
     """2D ACF of every bin for plotting.
 
     Args:
@@ -148,12 +148,14 @@ def acf_map(frequency, rel_power, centres, idx_start, idx_end, n_lag: int = 300)
         rel_power: relative power.
         centres, idx_start, idx_end: bins (see log_numax_bins).
         n_lag: points on the lag axis.
+        lag_unit: "dnu" (lag / Delta-nu(bin centre)) or "muHz" (linear frequency lag).
 
     Returns:
-        (lag grid in units of Delta-nu(bin centre), r(k) / white-noise sd, [n_lag, n_bins]).
+        (lag grid in lag_unit, r(k) / white-noise sd [n_lag, n_bins]); NaN where a bin
+        has no such lag.
     """
     df = frequency[1] - frequency[0]
-    dnu = delta_nu(centres)
+    dnu = delta_nu(centres) if lag_unit == "dnu" else np.ones(len(centres))
     widths = (idx_end - idx_start) * df / dnu
     grid = np.linspace(0.0, np.nanmax(widths), n_lag)
     out = np.full((n_lag, len(centres)), np.nan)
@@ -202,7 +204,8 @@ def calculate_cacf(frequency, rel_power, cfg) -> dict:
 
     Returns:
         {(overlap_scale, width_factor, smoothing_factor): {bin_centers, N_data_points_in_bin,
-        cacf_raw, cacf_smoothed[, null_mean, null_sd]}}.
+        cacf_raw, cacf_smoothed, noise_mean[, null_sd]}}; cacf_raw is the collapsed
+        autocorrelation minus its white-noise mean (noise_mean).
     """
     t0 = time.perf_counter()
     frequency = np.ascontiguousarray(frequency)
@@ -212,14 +215,16 @@ def calculate_cacf(frequency, rel_power, cfg) -> dict:
     for scale in as_float_list(cfg.overlap_scale)[::-1]:
         for factor in as_float_list(cfg.width_factor)[::-1]:
             centres, i0, i1 = log_numax_bins(frequency, min_freq, cfg.max_freq, factor, scale)
-            extra = {}
             if cfg.collapse == "all_lags":
-                raw = cacf_in_windows(rel_power, i0, i1)
+                noise_mean = acf_noise_mean(i1 - i0)
+                raw = cacf_in_windows(rel_power, i0, i1) - noise_mean
+                extra = {"noise_mean": noise_mean}
             else:
                 k_lo, k_hi = delta_nu_lag_ranges(centres, frequency, cfg.dnu_window,
                                                  cfg.dnu_multiples)
-                raw, null_mean, null_sd = cacf_delta_nu_in_windows(rel_power, i0, i1, k_lo, k_hi)
-                extra = {"null_mean": null_mean, "null_sd": null_sd}
+                stat, noise_mean, null_sd = cacf_delta_nu_in_windows(rel_power, i0, i1, k_lo, k_hi)
+                raw = stat - noise_mean
+                extra = {"noise_mean": noise_mean, "null_sd": null_sd}
             for sf, smoothed in smooth_over_envelope(centres, raw, cfg.smoothing_factor).items():
                 results[(scale, factor, sf)] = {
                     "bin_centers": centres,

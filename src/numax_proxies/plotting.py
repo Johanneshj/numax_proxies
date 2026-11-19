@@ -74,6 +74,7 @@ def plot_acf_map(ax, method):
     """Draw the 2D ACF of one grid setting into ax.
 
     Colour: r(k) / white-noise sd, black = anticorrelated, white = noise, red = correlated.
+    Lag axis: units of Delta-nu(bin centre) for collapse delta_nu, muHz for all_lags.
 
     Args:
         ax: matplotlib axes.
@@ -87,14 +88,18 @@ def plot_acf_map(ax, method):
     freq = np.ascontiguousarray(method.frequency)
     centres, i0, i1 = log_numax_bins(freq, float(max(freq[0], cfg.min_freq)), cfg.max_freq,
                                      factor, scale)
-    lags, z = acf_map(freq, method.normalized_power, centres, i0, i1)
+    in_dnu = cfg.collapse == "delta_nu"
+    lags, z = acf_map(freq, method.normalized_power, centres, i0, i1,
+                      lag_unit="dnu" if in_dnu else "muHz")
     ax.pcolormesh(centres, lags, z, shading="nearest", cmap=ACF_MAP_CMAP, vmin=-4, vmax=4,
                   rasterized=True)
-    if cfg.collapse == "delta_nu":
+    if in_dnu:
         for m in cfg.dnu_multiples:
             for edge in (1 - cfg.dnu_window, 1 + cfg.dnu_window):
                 ax.axhline(m * edge, c="k", ls=":", lw=0.8)
-    ax.set(ylabel=r"lag [$\Delta\nu(\nu_c)$]", ylim=(0, factor))
+        ax.set(ylabel=r"lag [$\Delta\nu(\nu_c)$]", ylim=(0, factor))
+    else:
+        ax.set(ylabel=r"lag [$\mu$Hz]", ylim=(0, lags[-1]))
     ax.text(0.98, 0.95, f"overlap {scale:g}, width {factor:g}", ha="right", va="top",
             transform=ax.transAxes, fontsize=7,
             bbox=dict(facecolor="white", alpha=0.7, lw=0))

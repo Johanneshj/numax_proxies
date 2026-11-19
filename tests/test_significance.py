@@ -38,3 +38,19 @@ def test_config_levels():
     ACFConfig(FAP_threshold="99p0", significance_at_numax=True)
     with pytest.raises(ValueError):
         ACFConfig(FAP_threshold="99p9")
+
+
+def test_all_lags_white_noise_calibration():
+    """MCC - mu0 has mean ~0 on white noise, and exceeds the 99 % threshold ~1 % of the time."""
+    from numax_proxies.methods.acf import cacf_in_windows
+    from numax_proxies.significance import acf_noise_mean
+
+    rng = np.random.default_rng(7)
+    for N in (12, 50, 700):         # N = 5-7 lie between the first table nodes (less exact)
+        n_bins = 20000
+        x = rng.exponential(size=N * n_bins) / np.log(2) - 1
+        i0 = np.arange(n_bins) * N
+        stat = cacf_in_windows(x, i0, i0 + N) - acf_noise_mean(np.full(n_bins, N))
+        assert abs(np.mean(stat)) < 0.05 * acf_noise_mean(N)
+        rate = np.mean(stat > table_threshold("ACF", np.full(n_bins, N), "99p0"))
+        assert 0.005 < rate < 0.02

@@ -7,7 +7,7 @@ Two model-independent methods are run over a grid of binning and smoothing setti
 
 | method | statistic per frequency bin | white noise gives |
 |---|---|---|
-| **ACF** – collapsed autocorrelation (Huber+2009, Viani+2019) | mean \|ACF\| / √n / variance of the relative power: regularity within the bin | ≈ 0.52 |
+| **ACF** – collapsed autocorrelation (Huber+2009, Viani+2019) | autocorrelation of the relative power (regularity within the bin), minus its white-noise mean | ≈ 0 |
 | **CoV** – coefficient of variation (Bell+2019, Viani+2019) | std / mean of the power | ≈ 1 |
 
 The package also gives ν<sub>max</sub> from **scaling relations** with stellar parameters from
@@ -112,17 +112,20 @@ Bins follow the expected large separation, Δν(ν) = 0.267 ν<sup>0.764</sup> (
 
 ### 4. Statistic per bin
 * **CoV**: sample standard deviation (ddof = 1) / mean.
-* **ACF**: mean |ACF(k)| / √n / σ² over the lags k = 1 … n−1, with ACF(k) = Σ x<sub>j</sub>x<sub>j+k</sub>
-  of the centred x and σ² = ACF(0)/n the variance in the bin. For white noise
-  ACF(k) ~ σ²√(n−k), so the 1/√n makes the noise level independent of the bin size (≈ 0.52),
-  and dividing by σ² removes the scale of the power: the statistic measures regularity within
-  the bin, not its variance. Collapsed to one number by `collapse`:
-  * `all_lags` (default): the mean over all lags 1 … n−1 (as above).
-  * `delta_nu`: r(k) = ACF(k)/ACF(0), signed, averaged over the lags within ±`dnu_window` of
-    m·Δν(ν<sub>c</sub>) for each m in `dnu_multiples`: how strongly the spectrum repeats at the
-    Δν expected if ν<sub>max</sub> were at the bin centre. Bins must be wider than
-    (1 + `dnu_window`)·max(m) Δν. Its white-noise threshold is analytic: r(k) has mean
-    −(n−k)/n² and variance (n−k)/n², lags ~independent → mean + z·σ.
+* **ACF**: the autocorrelation r(k) = ACF(k)/ACF(0), with ACF(k) = Σ x<sub>j</sub>x<sub>j+k</sub>
+  of the centred x. Dividing by the zero lag removes the scale of the power, so r(k) measures
+  regularity within the bin, not its variance. It is collapsed to one number by `collapse`,
+  and the white-noise mean of that number is subtracted, so white noise gives ≈ 0 in every
+  bin, whatever its size:
+  * `all_lags` (default): mean |r(k)| over all lags 1 … n−1 (Viani's MCC) minus μ<sub>0</sub>(n).
+    For white noise mean |r| ≈ 0.53/√n; μ<sub>0</sub>(n) is taken from the simulations behind the
+    FAP tables.
+  * `delta_nu`: r(k), signed, averaged over the lags within ±`dnu_window` of
+    m·Δν(ν<sub>c</sub>) for each m in `dnu_multiples` (how strongly the spectrum repeats at the
+    Δν expected if ν<sub>max</sub> were at the bin centre), minus its white-noise mean. For
+    white noise r(k) has mean −(n−k)/n² and variance (n−k)/n², lags ~independent, so mean
+    and threshold are analytic (threshold z·σ). Bins must be wider than
+    (1 + `dnu_window`)·max(m) Δν.
 
 ### 5. Smoothing
 Running mean of the binned curve over `smoothing_factor` × envelope FWHM.
@@ -132,8 +135,10 @@ The raw (unsmoothed) statistic of each bin is compared with a white-noise thresh
 `FAP_threshold` sets the level per bin: `95p0` or `99p0`.
 The threshold depends only on the number of points N in the bin:
 `src/numax_proxies/fap_tables.json` holds the 95th and 99th percentiles for N = 4, 8, …, 65536,
-each from 10⁶ simulated bins of independent χ²₂ noise (`scripts/make_fap_tables.py`). A bin's
-threshold is interpolated in log N at its actual N. Bins with N < 4 are never significant.
+each from 10⁶ simulated bins of independent χ²₂ noise (`scripts/make_fap_tables.py`), and for
+the ACF also μ<sub>0</sub>(N). A bin's threshold is interpolated at its actual N (ACF: in log–log,
+since the values fall ∝ N<sup>−1/2</sup>). Bins with N < 4 are never significant. `delta_nu`
+needs no table (analytic).
 
 The thresholds are **per bin**: in a spectrum with many bins, noise exceeds one of them
 somewhere by chance (look-elsewhere effect).
@@ -159,13 +164,13 @@ The error is the median of the formal fit errors, which are too small.
 
 ACF (`collapse: delta_nu`, with the 2D ACF panel, `plot_2dacf: [10, 5]`) and CoV of a red
 giant and a main-sequence star, for widths 3, 5, 10, overlaps 5, 10 and smoothing factors
-0.5, 1, 1.5. Each line is one grid setting; dashed lines are the fitted ν<sub>max</sub>.
+0.5, 1, 1.5, with `significance_at_numax: true`. Each line is one grid setting; dashed lines are the fitted ν<sub>max</sub>.
 In the 2D ACF, red is correlated, white is white noise and black is anticorrelated; the
 dotted lines are the `delta_nu` lag window (1 ± `dnu_window`) Δν(ν<sub>c</sub>).
 
 | | ACF | CoV |
 |---|---|---|
-| **Red giant**, KIC 11612603 (APOKASC-3 ν<sub>max</sub> = 86.0 µHz; ACF 90.9, CoV 87.4) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) |
+| **Red giant**, KIC 11612603 (APOKASC-3 ν<sub>max</sub> = 86.0 µHz; ACF 91.1, CoV 87.4) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) |
 | **Main sequence**, KIC 6671492 (Sayeed et al. ν<sub>max</sub> = 728 µHz; ACF 770, CoV 699) | ![MS ACF](docs/figures/MS_ACF.png) | ![MS CoV](docs/figures/MS_CoV.png) |
 
 ## Configuration reference
@@ -219,7 +224,7 @@ Relative input paths are resolved relative to the YAML file. See
 | FAP_threshold | 95p0 | 95p0 or 99p0 (per bin) |
 | collapse | all_lags | ACF only: `all_lags` or `delta_nu` |
 | dnu_window, dnu_multiples | 0.1, [1] | ACF `delta_nu`: lag window (fraction of Δν), multiples of Δν |
-| plot_2dacf | false | ACF only: 2D ACF panel in ACF.png (lag in Δν(ν<sub>c</sub>) vs bin centre); `true` = first grid setting, or `[overlap_scale, width_factor]` |
+| plot_2dacf | false | ACF only: 2D ACF panel in ACF.png (lag vs bin centre; lag in Δν(ν<sub>c</sub>) for `delta_nu`, in µHz for `all_lags`); `true` = first grid setting, or `[overlap_scale, width_factor]` |
 | significance_at_numax | false | true: a significant bin must lie within 1 FWHM of the fitted numax |
 | plot, plot_log_scale | false | figures |
 | save_info | false | `all_data.pkl.gz` with every grid setting |
