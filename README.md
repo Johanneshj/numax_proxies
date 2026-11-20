@@ -192,7 +192,8 @@ Relative input paths are resolved relative to the YAML file. See
 | author, quarter, sector, mission | null | lightkurve download |
 | logg, teff, radius, mass, luminosity (+ `_err`) | null | lists, one value per source |
 
-**LIGHTCURVE / PSD**: `lc_file`, `fits_file_folder`, `psd_file`, `avg_psd_file` (all null).
+**LIGHTCURVE / PSD**: `lc_file`, `fits_file_folder`, `psd_file`, `avg_psd_file` (all null). Figures label the PSD in ppm²/µHz, the unit of spectra computed
+by the package (and of KEPSEISMIC/KASOC files); PSD files in other units are plotted unchanged.
 
 **CONFIG**
 | key | default | |
@@ -211,6 +212,7 @@ Relative input paths are resolved relative to the YAML file. See
 | query_gaia | false | Gaia DR3 Teff, logg, M, R, L for the scaling relations |
 | initial_numax | null | skip the automatic first guess (µHz) |
 | n_threads | null | Numba threads (null: Numba default) |
+| figure_format | png | `png`, `pdf` or `[png, pdf]`; all figures are one A&A column (8.8 cm) wide; in pdf files spectra and the 2D ACF are rasterised at 600 dpi |
 | random_seed | 42 | every random number in the pipeline |
 | plot_lc, save_lc, save_psd, save_avgpsd, save_results | false | outputs |
 | results_directory | results | relative to the working directory |

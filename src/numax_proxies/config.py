@@ -106,13 +106,18 @@ class ProcessingConfig:
     save_avgpsd: bool = False
     save_results: bool = False
     results_directory: str = "results"
+    figure_format: Union[str, list] = "png"  # png, pdf, or [png, pdf] (figures 8.8 cm wide)
 
     def __post_init__(self):
-        """Check avg_psd_method and avg_psd_overlap."""
+        """Check avg_psd_method, avg_psd_overlap and figure_format."""
         if self.avg_psd_method not in ("median", "mean"):
             raise ValueError("CONFIG.avg_psd_method must be 'median' or 'mean'")
         if not 0 <= self.avg_psd_overlap < 1:
             raise ValueError("CONFIG.avg_psd_overlap must be in [0, 1)")
+        formats = [str(f).lower().lstrip(".") for f in np.atleast_1d(self.figure_format)]
+        if not formats or any(f not in ("png", "pdf") for f in formats):
+            raise ValueError("CONFIG.figure_format must be 'png', 'pdf' or a list of them")
+        self.figure_format = list(dict.fromkeys(formats))
 
 
 @dataclass

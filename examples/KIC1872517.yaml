@@ -58,6 +58,7 @@ CONFIG:
   save_avgpsd: false
   save_results: true
   results_directory: results_example   # relative to the working directory
+  figure_format: png          # png, pdf or [png, pdf]
 
 ACF_CONFIG:
   min_freq: 1.0               # muHz
