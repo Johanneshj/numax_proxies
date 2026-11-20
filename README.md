@@ -12,7 +12,7 @@ Two model-independent methods, each run over a grid of binning and smoothing set
 ν<sub>max</sub> from **scaling relations** (stellar parameters from the YAML file and/or
 Gaia DR3) is also available.
 
-> ⚠️ **Known limitations (0.4.0).** Significance is tested per bin (no look-elsewhere
+> ⚠️ **Known limitations (0.5.0).** Significance is tested per bin (no look-elsewhere
 > correction), and the reported uncertainties are formal fit errors, which are too small.
 
 ---

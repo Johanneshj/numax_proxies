@@ -213,7 +213,7 @@ def fit_gaussian(x, y, numax_init):
 
     Returns:
         (ufloat(numax, formal error), [amp, sigma, centre], status); status is "fit",
-        "rejected" (peak above the CoV upper limit or centre <= 0) or "failed".
+        "rejected" (peak above the CoV upper limit, or centre on the edge of x) or "failed".
     """
     nan_result = ufloat(np.nan, np.nan), np.full(3, np.nan), "failed"
     rejected = ufloat(np.nan, np.nan), np.full(3, np.nan), "rejected"
@@ -224,16 +224,18 @@ def fit_gaussian(x, y, numax_init):
     if len(x) < 3:
         return nan_result
     try:
-        p0 = [np.max(y), envelope_fwhm(numax_init), numax_init]
+        lo, hi = x.min(), x.max()                       # centre within the fitted bins
+        p0 = [np.max(y), envelope_fwhm(numax_init), np.clip(numax_init, lo, hi)]
+        bounds = ([-np.inf, 1e-6, lo], [np.inf, np.inf, hi])
         with warnings.catch_warnings():
             warnings.simplefilter("error", OptimizeWarning)
-            popt, pcov = curve_fit(gaussian_offset_one, x, y, p0=p0)
+            popt, pcov = curve_fit(gaussian_offset_one, x, y, p0=p0, bounds=bounds)
         sigma, centre = abs(popt[1]), popt[2]
         centre_unc = np.sqrt(np.diag(pcov))[2]          # formal error
         if not np.all(np.isfinite(popt)) or sigma <= 0:
             raise ValueError("non-finite or invalid parameters")
-        if centre <= 0:
-            return rejected
+        if np.isclose(centre, lo, rtol=1e-6) or np.isclose(centre, hi, rtol=1e-6):
+            return rejected                             # peak outside the window
         peak = _peak_cov(x, y, centre, sigma)
         if peak > cov_upper_limit(centre):
             logger.debug("Rejected fit at %.2f muHz: peak CoV %.3f above limit", centre, peak)
