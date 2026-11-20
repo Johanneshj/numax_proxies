@@ -153,6 +153,7 @@ class _MethodConfig:
     significance_at_numax: bool = False     # true: a significant bin must lie within 1 FWHM of numax
     plot: bool = False
     plot_log_scale: bool = False
+    plot_psps: bool = False                 # add the PSPS (comb check) around numax to the figure
     save_info: bool = False                 # all_data.pkl.gz with every grid setting
     save_results: bool = False              # numax_estimates.txt
 

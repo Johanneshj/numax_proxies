@@ -111,39 +111,41 @@ def near_artefact(numax: float, distance: float = 0.25, artefacts=KEPLER_SC_ARTE
     return any(abs(nu0 - numax) <= distance * envelope_fwhm(numax) for nu0, _ in artefacts)
 
 
-def psps_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
-    """Is there a comb with spacing ~Delta-nu(numax) around numax?
+def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
+    """Power spectrum of the power spectrum (PSPS) around numax, and the comb test on it.
 
-    Takes the relative power x = P / median - 1 within +- n_fwhm envelope FWHM of numax,
-    centres it, and computes its power spectrum (PSPS) |FT_t|^2 / (N var(x)), which for white
-    noise is ~Exp(1) at every t > 0. A comb with spacing Delta-nu gives a peak at
-    t = 1 / Delta-nu and, from the Delta-nu / 2 spacing of l = 0 and l = 1, at 2 / Delta-nu;
-    a single spike gives a flat PSPS. The largest PSPS value at t within +- tolerance of
-    1 / Delta-nu(numax) or 2 / Delta-nu(numax) is compared with the max-of-M threshold.
+    The relative power x = P / median - 1 within +- n_fwhm envelope FWHM of numax is
+    centred and Fourier transformed; z(t) = |FT_t|^2 / (N var(x)) is ~Exp(1) at every t > 0
+    for white noise. A comb with spacing Delta-nu gives peaks at t = 1 / Delta-nu and (from
+    the Delta-nu / 2 spacing of l = 0 and l = 1) at 2 / Delta-nu; a single spike gives a flat
+    PSPS. The largest z at t within +- tolerance of 1/Delta-nu(numax) or 2/Delta-nu(numax) is
+    compared with the max-of-M threshold at fap.
 
     Args:
         frequency: frequency grid [muHz] (uniform).
         rel_power: P / median - 1 on that grid.
-        numax: fitted numax [muHz].
+        numax: [muHz].
         tolerance: relative search range around 1/Delta-nu and 2/Delta-nu.
         fap: false-alarm probability of the test.
         n_fwhm: half-width of the stretch of spectrum, in envelope FWHM.
 
     Returns:
-        (comb present, z_max, spacing of the strongest PSPS peak [muHz]).
+        dict with t [1/muHz], z, search (bool mask), threshold, dnu (Delta-nu(numax)),
+        z_max, spacing (Delta-nu of the strongest peak in the search ranges [muHz]) and
+        comb (bool); None if the stretch is too short.
     """
     if not np.isfinite(numax) or numax <= 0:
-        return False, np.nan, np.nan
+        return None
     sel = np.abs(frequency - numax) <= n_fwhm * envelope_fwhm(numax)
     x = np.asarray(rel_power, dtype=float)[sel]
     x = x[np.isfinite(x)]
     n = x.size
     if n < 16:
-        return False, np.nan, np.nan
+        return None
     x = x - x.mean()
     var = np.mean(x * x)
     if var <= 0:
-        return False, np.nan, np.nan
+        return None
     df = frequency[1] - frequency[0]
     z = np.abs(np.fft.rfft(x)) ** 2 / (n * var)
     t = np.fft.rfftfreq(n, d=df)                              # [1/muHz]
@@ -153,11 +155,24 @@ def psps_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=
         search |= (t >= m / (dnu * (1 + tolerance))) & (t <= m / (dnu * (1 - tolerance)))
     search[0] = False
     if not search.any():
-        return False, np.nan, np.nan
+        return None
     k = np.flatnonzero(search)[np.argmax(z[search])]
     thr = max_exceedance_threshold(int(search.sum()), fap)
     spacing = 1.0 / t[k] * (2.0 if t[k] > 1.5 / dnu else 1.0)   # back to Delta-nu
-    return bool(z[k] > thr), float(z[k]), float(spacing)
+    return dict(t=t, z=z, search=search, threshold=thr, dnu=dnu, z_max=float(z[k]),
+                spacing=float(spacing), comb=bool(z[k] > thr))
+
+
+def psps_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
+    """Is there a comb with spacing ~Delta-nu(numax) around numax? (see psps)
+
+    Returns:
+        (comb present, z_max, spacing of the strongest PSPS peak [muHz]).
+    """
+    r = psps(frequency, rel_power, numax, tolerance, fap, n_fwhm)
+    if r is None:
+        return False, np.nan, np.nan
+    return r["comb"], r["z_max"], r["spacing"]
 
 
 class CombChecker:

@@ -254,6 +254,7 @@ by the package (and of KEPSEISMIC/KASOC files); PSD files in other units are plo
 | plot_2dacf | false | ACF only: 2D ACF panel in ACF.png (lag vs bin centre; lag in Δν(ν<sub>c</sub>) for `delta_nu`, in µHz for `all_lags`); `true` = first grid setting, or `[overlap_scale, width_factor]` |
 | significance_at_numax | false | true: a significant bin must lie within 1 FWHM of the fitted numax |
 | plot, plot_log_scale | false | figures |
+| plot_psps | false | add the PSPS around the fitted ν<sub>max</sub> (comb check): below the CoV curves; for the ACF with `plot_2dacf` a 2 × 2 figure 12 cm wide (A&A side caption) |
 | save_info | false | `all_data.pkl.gz` with every grid setting |
 | save_results | false | `numax_estimates.txt` |
 | max_acf_fit_iterations, n_sigma_numax_acf | 1, 2.0 | ACF only |
