@@ -19,6 +19,7 @@ except ImportError:  # style is optional
     pass
 
 COLUMN_WIDTH = 8.8 / 2.54          # A&A column [inch]
+SIDE_CAPTION_WIDTH = 12.0 / 2.54   # A&A figure with side caption [inch]
 DPI = 300                          # png
 PDF_RASTER_DPI = 600               # rasterised parts (spectra, 2D ACF) inside pdf files
 AA_RC = {                          # applied only while the package draws a figure
@@ -158,6 +159,53 @@ def plot_acf_map(ax, method):
             bbox=dict(facecolor="white", alpha=0.7, lw=0, pad=1))
 
 
+def plot_comb_check_panel(ax, method):
+    """Draw the comb check (Wiener-Khinchin) around the method's numax.
+
+    r(k) of the stretch within +- 1 envelope FWHM of numax against the shift in units of the
+    best trial spacing D; shaded: the central band (red) and the side bands (blue), with their
+    mean r (horizontal lines). The contrast of the two is the test statistic.
+
+    Args:
+        ax: matplotlib axes.
+        method: NumaxFromACF or NumaxFromCoV after compute().
+    """
+    from .artefacts import acf_comb_details
+
+    cfg = method.config
+    numax = method.numax_estimate.n
+    rel = method.normalized_power - (1.0 if method.name == "CoV" else 0.0)
+    d = acf_comb_details(method.frequency, rel, numax, cfg.comb_check_tolerance,
+                         cfg.comb_check_fap)
+    ax.set(xlabel=r"shift [$D$]", ylabel=r"$r(k)$", xlim=(0.4, 1.6))
+    if d is None:
+        ax.text(0.5, 0.5, "no numax", ha="center", va="center", transform=ax.transAxes)
+        return
+    x = d["lag"] / d["spacing"]
+    show = (x >= 0.4) & (x <= 1.6)
+    ax.axhline(0, c="0.6", lw=0.5)
+    ax.plot(x[show], d["r"][show], c="k", lw=0.5, rasterized=True)
+    for (lo, hi, mean), colour in zip(d["bands"], ("tab:red", "tab:blue", "tab:blue")):
+        lo, hi = lo / d["spacing"], hi / d["spacing"]
+        ax.axvspan(lo, hi, color=colour, alpha=0.15, lw=0)
+        ax.plot([lo, hi], [mean, mean], c=colour, lw=1.2)
+    verdict = "comb" if d["comb"] else "no comb"
+    ax.text(0.98, 0.96,
+            rf"$\nu_\mathrm{{max}}$ = {numax:.1f} {_mu()}Hz, $D$ = {d['spacing']:.2f} {_mu()}Hz"
+            + "\n" + rf"contrast {d['z']:.1f} vs {d['threshold']:.1f}: {verdict}",
+            ha="right", va="top", transform=ax.transAxes, fontsize=6,
+            bbox=dict(facecolor="white", alpha=0.8, lw=0, pad=1))
+    y = d["r"][show]
+    span = np.nanmax(np.abs(y)) if y.size else 1.0
+    ax.set_ylim(-1.1 * span, 1.35 * span)
+
+
+def _right_axis(ax):
+    """Ticks and label of the y axis on the right (right column of a 2 x 2 figure)."""
+    ax.yaxis.tick_right()
+    ax.yaxis.set_label_position("right")
+
+
 def _draw_spectrum(ax, method):
     """PSD and running median of an ACF/CoV method."""
     ax.loglog(method.frequency, method.power, c="gray", lw=0.4, label="spectrum", rasterized=True)
@@ -197,17 +245,27 @@ def _draw_cacf(ax, method):
 
 @_aa_style
 def plot_acf(method):
-    """Save ACF: spectrum, optionally the 2D ACF (plot_2dacf), and the CACF curves with
-    thresholds and fits; one A&A column.
+    """Save ACF: spectrum, CACF curves with thresholds and fits, and optionally the 2D ACF
+    (plot_2dacf) and the comb check (plot_comb_check). With all four panels: a 2 x 2 figure
+    12 cm wide (A&A side caption), y axes of the right column on the right; otherwise one
+    8.8 cm column.
 
     Args:
         method: NumaxFromACF after compute().
     """
     cfg, results = method.cfg, method.results
-    show_map = cfg.plot_2dacf is not False
-    names = ["spec"] + (["map"] if show_map else []) + ["cacf"]
-    fig, a = plt.subplots(len(names), 1, figsize=(COLUMN_WIDTH, 2.3 * len(names)))
-    panels = dict(zip(names, a))
+    show_map, show_wk = cfg.plot_2dacf is not False, bool(cfg.plot_comb_check)
+    if show_map and show_wk:
+        fig, a = plt.subplots(2, 2, figsize=(SIDE_CAPTION_WIDTH, 4.4))
+        panels = {"spec": a[0, 0], "map": a[0, 1], "cacf": a[1, 0], "wk": a[1, 1]}
+        _right_axis(panels["map"])
+        _right_axis(panels["wk"])
+        names = ["spec", "map", "cacf"]
+    else:
+        names = ["spec"] + (["map"] if show_map else []) + ["cacf"] + (["wk"] if show_wk else [])
+        fig, a = plt.subplots(len(names), 1, figsize=(COLUMN_WIDTH, 2.3 * len(names)))
+        panels = dict(zip(names, a))
+        names = [n for n in names if n != "wk"]
     _draw_spectrum(panels["spec"], method)
     _draw_cacf(panels["cacf"], method)
     xmax = max(np.max(d["bin_centers"]) for d in results.values())
@@ -219,6 +277,8 @@ def plot_acf(method):
         plot_acf_map(panels["map"], method)
         _set_xlim(panels["map"], cfg, xmax)
         panels["map"].set_xlabel(_freq_label("bin center"))
+    if show_wk:
+        plot_comb_check_panel(panels["wk"], method)
     fig.tight_layout()
     _save(fig, method.config, method.id, "ACF")
 
@@ -226,13 +286,18 @@ def plot_acf(method):
 # --------------------------------------------------------------------------------------
 @_aa_style
 def plot_cov(method):
-    """Save CoVs: CoV curves, thresholds, fits and the CoV upper limit.
+    """Save CoVs: CoV curves, thresholds, fits and the CoV upper limit; with plot_comb_check,
+    the comb-check diagnostic below.
 
     Args:
         method: NumaxFromCoV after compute().
     """
     cfg, results = method.cfg, method.results
-    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 2.8))
+    if cfg.plot_comb_check:
+        fig, (ax, ax_wk) = plt.subplots(2, 1, figsize=(COLUMN_WIDTH, 4.8),
+                                        gridspec_kw=dict(height_ratios=[1.4, 1]))
+    else:
+        fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 2.8))
     alpha = 0.25
     for data in results.values():
         bcs = np.asarray(data["bin_centers"])
@@ -264,6 +329,8 @@ def plot_cov(method):
     if cfg.plot_log_scale:
         ax.set_xscale("log")
     _set_xlim(ax, cfg, max(np.max(d["bin_centers"]) for d in results.values()))
+    if cfg.plot_comb_check:
+        plot_comb_check_panel(ax_wk, method)
     fig.tight_layout()
     _save(fig, method.config, method.id, "CoVs")
 

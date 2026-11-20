@@ -181,7 +181,7 @@ COMB_BANDS = ((0.90, 1.10, 1.0), (0.65, 0.85, -0.5), (1.15, 1.35, -0.5))   # (lo
 COMB_STEP = 0.05                                  # trial spacings D in steps of 5 % of Delta-nu
 
 
-def acf_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
+def acf_comb_details(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
     """Is there a comb around numax? Wiener-Khinchin test on the stretch of spectrum.
 
     The relative power x = P / median - 1 within +- n_fwhm envelope FWHM of numax is centred
@@ -208,21 +208,23 @@ def acf_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1
         n_fwhm: half-width of the stretch of spectrum, in envelope FWHM.
 
     Returns:
-        (comb present, largest standardised contrast, its spacing D [muHz]).
+        dict with lag [muHz], r, spacing (best trial D [muHz]), z (its standardised contrast),
+        threshold, comb (bool), bands ([(lo, hi, mean r)] at D, in muHz), dnu (Delta-nu(numax));
+        None if the stretch is too short.
     """
     if not np.isfinite(numax) or numax <= 0:
-        return False, np.nan, np.nan
+        return None
     sel = np.abs(frequency - numax) <= n_fwhm * envelope_fwhm(numax)
     x = np.asarray(rel_power, dtype=float)[sel]
     x = x[np.isfinite(x)]
     n = x.size
     if n < 16:
-        return False, np.nan, np.nan
+        return None
     x = x - x.mean()
     nfft = 1 << int(np.ceil(np.log2(2 * n)))
     corr = np.fft.irfft(np.abs(np.fft.rfft(x, nfft)) ** 2, nfft)[:n]
     if not corr[0] > 0:
-        return False, np.nan, np.nan
+        return None
     r = corr / corr[0]
     d = (n - np.arange(n)) / n ** 2                       # white-noise Var r(k) (= -E r(k))
     df = frequency[1] - frequency[0]
@@ -247,9 +249,27 @@ def acf_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1
             if z > best_z:
                 best_z, best_d = z, spacing
     if n_trials == 0:
-        return False, np.nan, np.nan
+        return None
     threshold = norm.isf(-np.expm1(np.log1p(-fap) / n_trials))
-    return bool(best_z > threshold), float(best_z), float(best_d)
+    lag = np.arange(n) * df
+    bands = []
+    for lo, hi, _ in COMB_BANDS:
+        m = (lag >= lo * best_d) & (lag <= hi * best_d) & (np.arange(n) >= 1)
+        bands.append((lo * best_d, hi * best_d, float(np.mean(r[m])) if m.any() else np.nan))
+    return dict(lag=lag, r=r, spacing=float(best_d), z=float(best_z), threshold=float(threshold),
+                comb=bool(best_z > threshold), bands=bands, dnu=dnu)
+
+
+def acf_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
+    """Is there a comb around numax? (see acf_comb_details)
+
+    Returns:
+        (comb present, largest standardised contrast, its spacing D [muHz]).
+    """
+    d = acf_comb_details(frequency, rel_power, numax, tolerance, fap, n_fwhm)
+    if d is None:
+        return False, np.nan, np.nan
+    return d["comb"], d["z"], d["spacing"]
 
 
 class CombChecker:
