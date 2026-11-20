@@ -327,6 +327,8 @@ class NumaxProxies:
                 from .plotting import plot_comb_scan
                 note = (f"{shown['status']}, {len(shown['scans'])} scan(s), start "
                         f"{shown['start']:.1f}" + (f", rejected {len(rejected)}" if rejected else ""))
+                if accepted and cfg.background_correction:
+                    note += f"\nbackground-corrected: {method.numax_override.n:.1f}"
                 plot_comb_scan(shown["scans"][-1], rel, spec.frequency, name, cfg,
                                self.star.target, note)
 

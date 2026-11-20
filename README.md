@@ -123,13 +123,24 @@ optional checks:
 
 ## 🖼️ Example figures
 
-ACF and CoV for a red giant (Kepler LC) and a main-sequence star (Kepler SC). The ACF
-figure shows the spectrum, the 2D ACF, the collapsed ACF and the PSPS comb check; the CoV
-figure shows the CoV curves and the PSPS comb check. Each line is one grid setting; dashed
-lines are the fitted ν<sub>max</sub>. In the PSPS panel the strongest peak sits at Δν.
+A red giant (Kepler LC) and a main-sequence star (Kepler SC), with `comb_scan` and
+`background_correction` on.
 
-| | ACF | CoV |
-|---|---|---|
+* **ACF**: spectrum, 2D ACF, collapsed ACF and the PSPS comb check.
+* **CoV**: CoV curves and the PSPS comb check.
+* **Comb scan** (of the ACF ν<sub>max</sub>): relative power, local 2D ACF with the two lag
+  bands, and the collapsed profile with its Gaussian fit.
+
+Each grey/black line is one grid setting; dashed blue lines are the fitted ν<sub>max</sub> per
+setting, the solid magenta line is the final ν<sub>max</sub> (comb scan, background-corrected).
+In the PSPS panel the strongest peak sits at Δν.
+
+| | ACF | CoV | Comb scan |
+|---|---|---|---|
+| **Red giant**, KIC 11612603 (ν<sub>max</sub> = 86.0 µHz) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) | ![RG comb scan](docs/figures/RG_CombScan.png) |
+| **Main sequence**, KIC 6671492 (ν<sub>max</sub> = 728 µHz) | ![MS ACF](docs/figures/MS_ACF.png) | ![MS CoV](docs/figures/MS_CoV.png) | ![MS comb scan](docs/figures/MS_CombScan.png) |
+
+---|---|---|
 | **Red giant**, KIC 11612603 (ν<sub>max</sub> = 86.0 µHz) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) |
 | **Main sequence**, KIC 6671492 (ν<sub>max</sub> = 728 µHz) | ![MS ACF](docs/figures/MS_ACF.png) | ![MS CoV](docs/figures/MS_CoV.png) |
 
