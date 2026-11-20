@@ -101,17 +101,33 @@ def null_mean_sd(n, d_pts, lo, hi):
 
 
 def _fit(centres, z, numax, fwhm):
-    """Bounded Gaussian with offset; None if the fit fails or its centre is at the edge."""
+    """Gaussian (with offset) fit to the profile, amplitude >= 0 (a comb envelope is a peak).
+
+    Started at the profile maximum (running mean over 5 windows) and at the tested numax; the
+    fit with the smaller squared residual is kept.
+
+    Returns:
+        (popt, pcov), or (None, None) if no fit succeeds or the centre is at the edge.
+    """
     lo, hi = centres.min(), centres.max()
     sig = fwhm / FWHM_TO_SIGMA
-    try:
-        p, cov = curve_fit(gaussian, centres, z, jac=gaussian_jac, p0=[max(z.max(), 1.0), sig, numax, 0.0],
-                           bounds=([-np.inf, 0.25 * sig, lo, -np.inf], [np.inf, 4 * sig, hi, np.inf]))
-    except (RuntimeError, ValueError):
-        return None, None
-    if np.isclose(p[2], lo, rtol=1e-6) or np.isclose(p[2], hi, rtol=1e-6):
-        return None, None
-    return p, cov
+    smooth = np.convolve(z, np.ones(5) / 5, mode="same")
+    starts = {float(centres[np.argmax(smooth)]), float(np.clip(numax, lo, hi))}
+    base = float(np.median(z))
+    best = (np.inf, None, None)
+    for c0 in starts:
+        a0 = max(float(np.interp(c0, centres, smooth)) - base, 1e-3)
+        try:
+            p, cov = curve_fit(gaussian, centres, z, jac=gaussian_jac, p0=[a0, sig, c0, base],
+                               bounds=([0.0, 0.25 * sig, lo, -np.inf], [np.inf, 4 * sig, hi, np.inf]))
+        except (RuntimeError, ValueError):
+            continue
+        if np.isclose(p[2], lo, rtol=1e-6) or np.isclose(p[2], hi, rtol=1e-6):
+            continue
+        rss = float(np.sum((z - gaussian(centres, *p)) ** 2))
+        if rss < best[0]:
+            best = (rss, p, cov)
+    return best[1], best[2]
 
 
 def comb_scan(frequency, rel_power, numax, width=3.0, span=2.0, with_map=True):

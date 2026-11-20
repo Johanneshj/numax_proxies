@@ -59,3 +59,13 @@ def test_null_is_calibrated():
     z = np.array([(_collapse(_autocorr(rng.exponential(size=n)), lo, hi) - mu) / sd
                   for _ in range(1500)])
     assert np.all(np.abs(z.mean(0)) < 0.1) and np.all(np.abs(z.std(0) - 1) < 0.07)
+
+
+def test_fit_takes_peak_not_dip():
+    """A dip at the tested numax and a peak elsewhere: the fit must take the peak."""
+    from numax_proxies.comb_scan import _fit
+    from numax_proxies.seismic import envelope_fwhm
+    x = np.linspace(250, 1000, 120)
+    z = 8 * np.exp(-0.5 * ((x - 550) / 40) ** 2) - 3 * np.exp(-0.5 * ((x - 720) / 50) ** 2)
+    p, _ = _fit(x, z, 640.0, float(envelope_fwhm(640.0)))
+    assert p is not None and p[0] > 0 and abs(p[2] - 550) < 15

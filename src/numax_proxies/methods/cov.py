@@ -228,8 +228,10 @@ def fit_gaussian(x, y, numax_init):
         return nan_result
     try:
         lo, hi = x.min(), x.max()                       # centre within the fitted bins
-        p0 = [np.max(y), envelope_fwhm(numax_init), np.clip(numax_init, lo, hi)]
-        bounds = ([-np.inf, 1e-6, lo], [np.inf, np.inf, hi])
+        # model 1 + A g: the excess above 1 is the amplitude; A >= 0 (an envelope is a peak,
+        # never a dip in the CoV)
+        p0 = [max(np.max(y) - 1.0, 1e-3), envelope_fwhm(numax_init), np.clip(numax_init, lo, hi)]
+        bounds = ([0.0, 1e-6, lo], [np.inf, np.inf, hi])
         with warnings.catch_warnings():
             warnings.simplefilter("error", OptimizeWarning)
             popt, pcov = curve_fit(gaussian_offset_one, x, y, p0=p0, bounds=bounds,
