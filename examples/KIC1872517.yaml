@@ -59,6 +59,9 @@ CONFIG:
   save_results: true
   results_directory: results_example   # relative to the working directory
   figure_format: png          # png, pdf or [png, pdf]
+  # Kepler short cadence only (STAR.cadence: Kepler_SC)
+  artefact_cleaning: false    # clean listed artefacts where a narrow peak is detected
+  comb_check: 'off'           # off | near_artefacts | always: PSPS comb test of fitted numax
 
 ACF_CONFIG:
   min_freq: 1.0               # muHz

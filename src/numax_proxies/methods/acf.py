@@ -342,24 +342,46 @@ def fit_cacf(raw, smoothed, centres, fap, initial_numax, max_iterations, n_sigma
     return ufloat(popt[2], abs(numax_unc)), popt
 
 
-def fit_all(results, initial_numax, cfg) -> dict:
+MAX_COMB_RETRIES = 3          # refits after a fit fails the comb check
+
+
+def fit_all(results, initial_numax, cfg, comb_checker=None) -> dict:
     """Fit every grid setting (in place).
 
     Args:
         results: output of calculate_cacf with "fap" added.
         initial_numax: starting guess [muHz] or None.
         cfg: ACFConfig.
+        comb_checker: callable numax -> bool (artefacts.CombChecker) or None. A fit that fails
+            it is repeated with one envelope FWHM around it excluded (MAX_COMB_RETRIES times).
 
     Returns:
-        results, with fit_numax (ufloat) and fit_params per setting.
+        results, with fit_numax (ufloat), fit_params and comb_rejected per setting.
     """
+    def fit(raw, smoothed, guess):
+        return fit_cacf(raw, smoothed, data["bin_centers"], data["fap"], guess,
+                        cfg.max_acf_fit_iterations, cfg.n_sigma_numax_acf, cfg.min_freq,
+                        cfg.significance_at_numax)
+
     for data in results.values():
-        numax, popt = fit_cacf(data["cacf_raw"], data["cacf_smoothed"], data["bin_centers"],
-                               data["fap"], initial_numax, cfg.max_acf_fit_iterations,
-                               cfg.n_sigma_numax_acf, cfg.min_freq, cfg.significance_at_numax)
+        bcs = np.asarray(data["bin_centers"], dtype=float)
+        raw = np.asarray(data["cacf_raw"], dtype=float)
+        smoothed = np.asarray(data["cacf_smoothed"], dtype=float)
+        excluded = []
+        numax, popt = fit(raw, smoothed, initial_numax)
+        while comb_checker is not None and np.isfinite(numax.n) and not comb_checker(numax.n):
+            excluded.append(numax.n)
+            if initial_numax is not None or len(excluded) > MAX_COMB_RETRIES:
+                numax, popt = ufloat(np.nan, np.nan), np.full(4, np.nan)
+                break
+            mask = np.zeros(bcs.size, dtype=bool)
+            for c in excluded:
+                mask |= np.abs(bcs - c) <= envelope_fwhm(c)
+            numax, popt = fit(np.where(mask, np.nan, raw), np.where(mask, np.nan, smoothed), None)
         data["fit_numax"] = numax
         data["fit_params"] = {"amp": popt[0], "sigma": popt[1], "numax": popt[2],
                               "y": popt[3], "numax_err": numax.s}
+        data["comb_rejected"] = excluded
     return results
 
 
@@ -386,6 +408,7 @@ class NumaxFromACF:
         self.config = config
         self.id = target or "unknown"
         self.initial_numax = initial_numax
+        self.comb_check_mode = None          # "near_artefacts" | "always" (set by the pipeline)
 
     def compute(self):
         """Relative power, CACF, thresholds and fits for every grid setting.
@@ -399,7 +422,14 @@ class NumaxFromACF:
                 self.frequency, self.power, self.cfg, self.config.random_seed)
             results = calculate_cacf(self.frequency, self.normalized_power, self.cfg)
         results = add_faps(results, "ACF", self.cfg)
-        self.results = fit_all(results, self.initial_numax, self.cfg)
+        checker = None
+        if self.comb_check_mode:
+            from ..artefacts import CombChecker
+            checker = CombChecker(self.frequency, self.normalized_power,
+                                  self.comb_check_mode, self.config.comb_check_tolerance,
+                                  self.config.comb_check_fap,
+                                  self.config.comb_check_distance)
+        self.results = fit_all(results, self.initial_numax, self.cfg, checker)
         logger.info("%s: ACF done in %.1f s", self.id, time.perf_counter() - t0)
         return self
 

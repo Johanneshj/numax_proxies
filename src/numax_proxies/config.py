@@ -91,7 +91,17 @@ class ProcessingConfig:
     avg_psd_chunk: float = 90.0             # days
     avg_psd_overlap: float = 0.0            # fraction of a chunk shared by neighbours
     avg_psd_method: Literal["median", "mean"] = "median"
-    clean_kepler_sc: Optional[bool] = None  # None: on if STAR.cadence == 'Kepler_SC'
+    clean_kepler_sc: Optional[bool] = False  # blind Kepler SC cleaning (+-5 % around each
+                                             # artefact); only if true (null = false)
+    # Kepler SC checks, used only if STAR.cadence == "Kepler_SC":
+    artefact_cleaning: bool = False         # clean listed artefacts only where a peak is detected
+    artefact_fap: float = 0.01              # false-alarm probability of a detection, per artefact
+    artefact_search_halfwidth: float = 1.0  # muHz around each listed frequency (broad: x5)
+    artefact_max_halfwidth: float = 3.0     # muHz, largest half-width replaced (broad: x5)
+    comb_check: Literal["off", "near_artefacts", "always"] = "off"   # PSPS comb test after fits
+    comb_check_fap: float = 0.01            # false-alarm probability of the comb test
+    comb_check_tolerance: float = 0.3       # search 1/Delta-nu and 2/Delta-nu within +- 30 %
+    comb_check_distance: float = 0.25       # near_artefacts: within this x envelope FWHM
 
     # misc
     query_gaia: bool = False
@@ -114,6 +124,15 @@ class ProcessingConfig:
             raise ValueError("CONFIG.avg_psd_method must be 'median' or 'mean'")
         if not 0 <= self.avg_psd_overlap < 1:
             raise ValueError("CONFIG.avg_psd_overlap must be in [0, 1)")
+        if self.comb_check not in ("off", "near_artefacts", "always"):
+            raise ValueError("CONFIG.comb_check must be 'off', 'near_artefacts' or 'always'")
+        if self.clean_kepler_sc and self.artefact_cleaning:
+            raise ValueError("CONFIG: use clean_kepler_sc (blind) or artefact_cleaning, not both")
+        for name in ("artefact_fap", "comb_check_fap"):
+            if not 0 < getattr(self, name) < 1:
+                raise ValueError(f"CONFIG.{name} must be in (0, 1)")
+        if not 0 < self.comb_check_tolerance < 1:
+            raise ValueError("CONFIG.comb_check_tolerance must be in (0, 1)")
         formats = [str(f).lower().lstrip(".") for f in np.atleast_1d(self.figure_format)]
         if not formats or any(f not in ("png", "pdf") for f in formats):
             raise ValueError("CONFIG.figure_format must be 'png', 'pdf' or a list of them")

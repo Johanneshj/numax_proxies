@@ -92,8 +92,24 @@ and Savitzky–Golay detrended (in that order). Its Lomb–Scargle PSD is calibr
 Parseval's theorem to ppm²/µHz. With `do_avg_psd`, an average of Hann-windowed PSDs of
 (overlapping) chunks is used instead, either the median or the mean of the chunks.
 
-Kepler short-cadence spectra (`clean_kepler_sc`) have known spurious peaks
-(Van Cleve+2016) replaced by noise.
+**Kepler short cadence.** Kepler SC spectra contain spurious peaks at known frequencies
+(Van Cleve et al. 2016, 40 listed in `artefacts.py`). With `STAR.cadence: Kepler_SC` two
+checks can be switched on (they are ignored, with a warning, for other cadences):
+* `artefact_cleaning`: at each listed frequency, the largest normalised power within
+  ±`artefact_search_halfwidth` µHz is compared with the threshold for the maximum of that many
+  χ²₂ points at `artefact_fap`. Only if it is exceeded, the contiguous points around the peak
+  above 3× the mean power (at most ±`artefact_max_halfwidth` µHz; broad artefacts ×5) are
+  replaced by χ²₂ noise. The oscillation comb is left alone, at worst one mode is lost.
+* `comb_check` (`near_artefacts` or `always`): after a fit, the stretch of relative power
+  within ±1 envelope FWHM of the fitted ν<sub>max</sub> must show a comb. Its power spectrum
+  (PSPS, normalised so that white noise is Exp(1) in every bin) is searched near 1/Δν and 2/Δν
+  (±`comb_check_tolerance`); a peak above the max-of-M threshold at `comb_check_fap` means a
+  comb, a single spurious peak gives a flat PSPS. A fit without a comb is repeated with
+  ±1 FWHM around it excluded (up to 3 times); otherwise no result (CoV `fit_type: no_comb`).
+  `near_artefacts` tests only fits within `comb_check_distance` envelope FWHM of a listed
+  artefact.
+
+The older `clean_kepler_sc: true` replaces ±5 % around every listed frequency blindly.
 
 ### 2. Normalisation
 Below `min_freq` the PSD is optionally replaced by χ²₂ white noise at the local level
@@ -155,7 +171,7 @@ one envelope FWHM of the fitted ν<sub>max</sub>.
   bins. A Gaussian on an offset of 1 is fitted within ±1 FWHM of it, and fits whose peak CoV
   exceeds 2.69 ν<sup>0.154</sup> are rejected. If no fit is possible, a CoV-weighted mean
   frequency is used (`use_fallback`). Every setting records `fit_type`: gaussian, fallback,
-  rejected, not_significant (see `significance_at_numax`) or none.
+  rejected, not_significant (see `significance_at_numax`), no_comb (see `comb_check`) or none.
 
 The reported value is the median over all grid settings with a finite numax and error.
 The error is the median of the formal fit errors, which are too small.
@@ -188,7 +204,7 @@ Relative input paths are resolved relative to the YAML file. See
 | key | default | |
 |---|---|---|
 | target | null | name, used for output folders, Gaia, downloads |
-| cadence | null | `Kepler_SC` switches on `clean_kepler_sc` by default |
+| cadence | null | `Kepler_SC` allows the Kepler short-cadence checks (`artefact_cleaning`, `comb_check`) |
 | author, quarter, sector, mission | null | lightkurve download |
 | logg, teff, radius, mass, luminosity (+ `_err`) | null | lists, one value per source |
 
@@ -208,7 +224,11 @@ by the package (and of KEPSEISMIC/KASOC files); PSD files in other units are plo
 | weight_psd_by_flux_err | false | true: old normalisation, (flux/flux_err)² |
 | do_avg_psd | false | use the averaged PSD (breaks the FAP assumptions) |
 | avg_psd_chunk, avg_psd_overlap, avg_psd_method | 90.0, 0.0, median | chunk length [d], overlap fraction, median/mean |
-| clean_kepler_sc | null | null: on for cadence `Kepler_SC`; true/false to force |
+| clean_kepler_sc | false | blind cleaning of ±5 % around every listed Kepler SC artefact |
+| artefact_cleaning | false | Kepler SC: clean listed artefacts only where a narrow peak is detected |
+| artefact_fap, artefact_search_halfwidth, artefact_max_halfwidth | 0.01, 1.0, 3.0 | detection level; search and largest replaced half-width [µHz] (broad artefacts ×5) |
+| comb_check | off | Kepler SC: `near_artefacts` or `always` – PSPS comb test of every fitted ν<sub>max</sub> |
+| comb_check_fap, comb_check_tolerance, comb_check_distance | 0.01, 0.3, 0.25 | test level; search range around 1/Δν, 2/Δν; `near_artefacts` distance [envelope FWHM] |
 | query_gaia | false | Gaia DR3 Teff, logg, M, R, L for the scaling relations |
 | initial_numax | null | skip the automatic first guess (µHz) |
 | n_threads | null | Numba threads (null: Numba default) |

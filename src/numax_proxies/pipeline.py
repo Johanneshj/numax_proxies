@@ -43,6 +43,7 @@ class NumaxProxies:
         self.psd = None
         self.avg_psd = None
         self.rng = np.random.default_rng(self.config.random_seed)
+        self.artefact_report = []
 
     @classmethod
     def read_yaml(cls, yaml_path: str) -> "NumaxProxies":
@@ -105,13 +106,28 @@ class NumaxProxies:
             self.avg_psd = load_psd(self.psd_input.avg_psd_file)
         else:
             self._spectrum_from_lightcurve()
+        if self.config.artefact_cleaning and self.psd is not None and self._kepler_sc_checks(
+                "artefact_cleaning"):
+            from .artefacts import clean_detected_artefacts
+            cfg = self.config
+            power, self.artefact_report = clean_detected_artefacts(
+                self.psd.frequency, self.psd.psd, self.rng, cfg.artefact_fap,
+                cfg.artefact_search_halfwidth, cfg.artefact_max_halfwidth)
+            self.psd = PSDData(self.psd.frequency, power)
         return self
+
+    def _kepler_sc_checks(self, option: str) -> bool:
+        """True if the Kepler SC checks apply (STAR.cadence == "Kepler_SC"); warn otherwise."""
+        if self.star.cadence == "Kepler_SC":
+            return True
+        logger.warning("%s: CONFIG.%s is only used for STAR.cadence 'Kepler_SC'; ignored",
+                       self.star.target, option)
+        return False
 
     @property
     def _clean_kepler_sc(self) -> bool:
-        """Clean Kepler SC artefacts? (clean_kepler_sc; None = if cadence is Kepler_SC)."""
-        flag = self.config.clean_kepler_sc
-        return self.star.cadence == "Kepler_SC" if flag is None else bool(flag)
+        """Blind Kepler SC cleaning? (only if clean_kepler_sc is true)."""
+        return bool(self.config.clean_kepler_sc)
 
     def _spectrum_from_lightcurve(self):
         """Load and process the light curve, then compute the PSD (and averaged PSD)."""
@@ -170,7 +186,10 @@ class NumaxProxies:
             The method object.
         """
         method = cls(self._spectrum_for_methods(), cfg, self.config, self.star.target,
-                     self.config.initial_numax).compute()
+                     self.config.initial_numax)
+        if self.config.comb_check != "off" and self._kepler_sc_checks("comb_check"):
+            method.comb_check_mode = self.config.comb_check
+        method.compute()
         if cfg.plot:
             method.plot()
         if cfg.save_info:

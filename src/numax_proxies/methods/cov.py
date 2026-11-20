@@ -264,7 +264,56 @@ def weighted_mean_numax(x, y):
     return ufloat(estimate, np.std(x, ddof=1) if len(x) > 1 else np.nan)
 
 
-def fit_all(results, initial_numax=None, use_fallback=True, at_numax=False) -> dict:
+MAX_COMB_RETRIES = 3          # refits after a fit fails the comb check
+
+
+def _mask_near(bcs, values, centres):
+    """Copy of values with NaN within one envelope FWHM of each centre."""
+    out = np.array(values, dtype=float, copy=True)
+    for c in centres:
+        out[np.abs(bcs - c) <= envelope_fwhm(c)] = np.nan
+    return out
+
+
+def _fit_one(data, initial_numax, use_fallback, at_numax):
+    """Fit one grid setting.
+
+    Returns:
+        (ufloat numax, params dict, fit_type).
+    """
+    nan_params = {"amp": np.nan, "sigma": np.nan, "numax": np.nan, "numax_err": np.nan}
+    none = ufloat(np.nan, np.nan), dict(nan_params), "none"
+    numax_init = initial_numax if initial_numax is not None else initial_numax_from_cov(data)
+    if numax_init is None or not np.isscalar(numax_init) or not np.isfinite(numax_init) \
+            or numax_init <= 0:
+        return none
+    bcs = np.asarray(data["bin_centers"], dtype=float)
+    scov = np.asarray(data["cov_smoothed"], dtype=float)
+    width = envelope_fwhm(numax_init)
+    window = (np.isfinite(bcs) & np.isfinite(scov)
+              & (bcs >= numax_init - width) & (bcs <= numax_init + width))
+    if not np.any(window):
+        return none
+    x, y = bcs[window], scov[window]
+    result = none
+    numax, popt, status = fit_gaussian(x, y, numax_init)
+    if status == "fit":
+        result = numax, {"amp": popt[0], "sigma": popt[1], "numax": popt[2],
+                         "numax_err": numax.s}, "gaussian"
+    elif status == "rejected":
+        result = ufloat(np.nan, np.nan), dict(nan_params), "rejected"
+    elif use_fallback:
+        fallback = weighted_mean_numax(x, y)
+        if np.isfinite(fallback.n):
+            result = fallback, dict(nan_params), "fallback"
+    if at_numax and result[2] in ("gaussian", "fallback") and not significant_near(
+            bcs, data["cov"], data["fap"], result[0].n):
+        result = ufloat(np.nan, np.nan), dict(nan_params), "not_significant"
+    return result
+
+
+def fit_all(results, initial_numax=None, use_fallback=True, at_numax=False,
+            comb_checker=None) -> dict:
     """Fit every grid setting (in place).
 
     Args:
@@ -272,50 +321,37 @@ def fit_all(results, initial_numax=None, use_fallback=True, at_numax=False) -> d
         initial_numax: starting guess [muHz]; None = from each setting's significant bins.
         use_fallback: use the weighted mean when no Gaussian fit is possible.
         at_numax: require a significant bin within one envelope FWHM of the result.
+        comb_checker: callable numax -> bool (artefacts.CombChecker) or None. A fit that fails
+            it is repeated with one envelope FWHM around it excluded (MAX_COMB_RETRIES times).
 
     Returns:
         results, with fit_numax (ufloat), fit_params and fit_type ("gaussian", "fallback",
-        "rejected", "not_significant" or "none") per setting.
+        "rejected", "not_significant", "no_comb" or "none") per setting.
     """
-    counts = dict.fromkeys(("gaussian", "fallback", "rejected", "not_significant", "none"), 0)
-    nan_params = {"amp": np.nan, "sigma": np.nan, "numax": np.nan, "numax_err": np.nan}
+    counts = dict.fromkeys(("gaussian", "fallback", "rejected", "not_significant", "no_comb",
+                            "none"), 0)
     for data in results.values():
-        data["fit_numax"], data["fit_params"], data["fit_type"] = (
-            ufloat(np.nan, np.nan), dict(nan_params), "none")
-        numax_init = initial_numax if initial_numax is not None else initial_numax_from_cov(data)
-        if numax_init is None or not np.isscalar(numax_init) or not np.isfinite(numax_init) \
-                or numax_init <= 0:
-            counts["none"] += 1
-            continue
-
         bcs = np.asarray(data["bin_centers"], dtype=float)
-        scov = np.asarray(data["cov_smoothed"], dtype=float)
-        width = envelope_fwhm(numax_init)
-        window = (np.isfinite(bcs) & np.isfinite(scov)
-                  & (bcs >= numax_init - width) & (bcs <= numax_init + width))
-        if not np.any(window):
-            counts["none"] += 1
-            continue
-        x, y = bcs[window], scov[window]
-
-        numax, popt, status = fit_gaussian(x, y, numax_init)
-        if status == "fit":
-            data["fit_numax"], data["fit_type"] = numax, "gaussian"
-            data["fit_params"] = {"amp": popt[0], "sigma": popt[1], "numax": popt[2],
-                                  "numax_err": numax.s}
-        elif status == "rejected":
-            data["fit_type"] = "rejected"
-        elif use_fallback:
-            fallback = weighted_mean_numax(x, y)
-            if np.isfinite(fallback.n):
-                data["fit_numax"], data["fit_type"] = fallback, "fallback"
-        if at_numax and data["fit_type"] in ("gaussian", "fallback") and not significant_near(
-                bcs, data["cov"], data["fap"], data["fit_numax"].n):
-            data["fit_numax"], data["fit_params"] = ufloat(np.nan, np.nan), dict(nan_params)
-            data["fit_type"] = "not_significant"
-        counts[data["fit_type"]] += 1
-    logger.info("CoV fits: %(gaussian)d Gaussian, %(fallback)d fallback, %(rejected)d "
-                "rejected, %(not_significant)d not significant at numax, %(none)d none", counts)
+        excluded = []
+        numax, params, fit_type = _fit_one(data, initial_numax, use_fallback, at_numax)
+        while comb_checker is not None and fit_type in ("gaussian", "fallback") \
+                and not comb_checker(numax.n):
+            excluded.append(numax.n)
+            if initial_numax is not None or len(excluded) > MAX_COMB_RETRIES:
+                numax, params, fit_type = ufloat(np.nan, np.nan), {}, "no_comb"
+                break
+            trial = dict(data, cov=_mask_near(bcs, data["cov"], excluded),
+                         cov_smoothed=_mask_near(bcs, data["cov_smoothed"], excluded))
+            numax, params, fit_type = _fit_one(trial, None, use_fallback, at_numax)
+        if excluded and fit_type in ("none", "not_significant", "rejected"):
+            fit_type = "no_comb"                         # nothing left after the rejections
+        nan_params = {"amp": np.nan, "sigma": np.nan, "numax": np.nan, "numax_err": np.nan}
+        data["fit_numax"], data["fit_params"], data["fit_type"] = numax, params or nan_params, fit_type
+        data["comb_rejected"] = excluded
+        counts[fit_type] += 1
+    logger.info("CoV fits: %(gaussian)d Gaussian, %(fallback)d fallback, %(rejected)d rejected, "
+                "%(not_significant)d not significant at numax, %(no_comb)d no comb, %(none)d none",
+                counts)
     return results
 
 
@@ -342,6 +378,7 @@ class NumaxFromCoV:
         self.config = config
         self.id = target or "unknown"
         self.initial_numax = initial_numax
+        self.comb_check_mode = None          # "near_artefacts" | "always" (set by the pipeline)
 
     def compute(self):
         """Normalised power, CoV, thresholds and fits for every grid setting.
@@ -355,8 +392,15 @@ class NumaxFromCoV:
                 self.frequency, self.power, self.cfg, self.config.random_seed)
             results = calculate_covs(self.frequency, self.normalized_power, self.cfg)
         results = add_faps(results, "CoV", self.cfg)
+        checker = None
+        if self.comb_check_mode:
+            from ..artefacts import CombChecker
+            checker = CombChecker(self.frequency, self.normalized_power - 1.0,
+                                  self.comb_check_mode, self.config.comb_check_tolerance,
+                                  self.config.comb_check_fap,
+                                  self.config.comb_check_distance)
         self.results = fit_all(results, self.initial_numax, self.cfg.use_fallback,
-                               self.cfg.significance_at_numax)
+                               self.cfg.significance_at_numax, checker)
         logger.info("%s: CoV done in %.1f s", self.id, time.perf_counter() - t0)
         return self
 
