@@ -27,11 +27,6 @@ def test_psd_is_in_ppm2_per_muhz(rng, gaps):
     assert np.mean(psd.psd) == pytest.approx(expected, rel=0.05)
 
 
-def test_weighted_periodogram_is_old_normalisation(rng):
-    psd = periodogram(white_noise_lc(rng), weighted=True)
-    assert np.mean(psd.psd) == pytest.approx(1.0, rel=0.05)   # (flux / flux_err)^2
-
-
 def test_frequency_grid_in_muhz(rng):
     psd = periodogram(white_noise_lc(rng))
     nyquist_muhz = 1e6 / (2 * DT_S)

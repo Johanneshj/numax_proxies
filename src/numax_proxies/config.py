@@ -86,13 +86,10 @@ class ProcessingConfig:
     # spectra
     oversampling: float = 1.0
     width_for_wf: Optional[float] = None    # width of the spectral window (muHz-equivalent, internal units)
-    weight_psd_by_flux_err: bool = False    # true = old behaviour, power in (flux/flux_err)^2
     do_avg_psd: bool = False                # use an averaged PSD from light-curve chunks
     avg_psd_chunk: float = 90.0             # days
     avg_psd_overlap: float = 0.0            # fraction of a chunk shared by neighbours
     avg_psd_method: Literal["median", "mean"] = "median"
-    clean_kepler_sc: Optional[bool] = False  # blind Kepler SC cleaning (+-5 % around each
-                                             # artefact); only if true (null = false)
     exclude_regions: list = field(default_factory=list)   # [[lo, hi], ...] muHz replaced by noise
     # Kepler SC checks, used only if STAR.cadence == "Kepler_SC":
     artefact_cleaning: bool = False         # clean listed artefacts only where a peak is detected
@@ -129,8 +126,6 @@ class ProcessingConfig:
             raise ValueError("CONFIG.avg_psd_overlap must be in [0, 1)")
         if self.comb_check not in ("off", "near_artefacts", "always"):
             raise ValueError("CONFIG.comb_check must be 'off', 'near_artefacts' or 'always'")
-        if self.clean_kepler_sc and self.artefact_cleaning:
-            raise ValueError("CONFIG: use clean_kepler_sc (blind) or artefact_cleaning, not both")
         for name in ("artefact_fap", "comb_check_fap"):
             if not 0 < getattr(self, name) < 1:
                 raise ValueError(f"CONFIG.{name} must be in (0, 1)")
@@ -158,9 +153,9 @@ class _MethodConfig:
     width_factor: list[float] = field(default_factory=lambda: [1.0])    # bin width in Delta-nu
     smoothing_factor: list[float] = field(default_factory=lambda: [1.0])  # in envelope FWHM
     median_filter_factor: float = DEFAULT_MEDIAN_FILTER_FACTOR  # running median width in FWHM
-    replace_below_min_freq: bool = True     # replace PSD below min_freq with white noise
+    replace_below_min_freq: bool = False    # replace PSD below min_freq with white noise
     FAP_threshold: Literal["95p0", "99p0"] = "95p0"   # per-bin white-noise level
-    significance_at_numax: bool = False     # true: a significant bin must lie within 1 FWHM of numax
+    significance_at_numax: bool = True      # true: a significant bin must lie within 1 FWHM of numax
     plot: bool = False
     plot_log_scale: bool = False
     plot_comb_check: bool = False           # add the comb-check diagnostic (PSPS) panel

@@ -1,4 +1,4 @@
-"""Power spectra from light curves, averaged spectra, and Kepler short-cadence cleaning.
+"""Power spectra from light curves and averaged spectra.
 
 Periodogram routines adapted from Martin Nielsen (Porto summer school 2024).
 Averaged PSD: Sylvain Breton (INAF-OACT) and Johannes Jorgensen (UIBK).
@@ -73,29 +73,25 @@ def frequency_resolution(time, nyq: float, oversampling: float = 1.0, width=None
     return simpson(w, x=f)
 
 
-def periodogram(lc: LightCurveData, oversampling: float = 1.0, width_for_wf=None,
-                weighted: bool = False) -> PSDData:
-    """Lomb-Scargle power spectral density of a light curve.
+def periodogram(lc: LightCurveData, oversampling: float = 1.0, width_for_wf=None) -> PSDData:
+    """Lomb-Scargle power spectral density of a light curve, calibrated with Parseval
+    (ppm^2/muHz).
 
     Args:
         lc: LightCurveData (time [days], flux [ppm]).
         oversampling: oversampling factor.
         width_for_wf: half-width of the spectral window [1/day]; None = default.
-        weighted: True = flux_err-weighted astropy "psd" normalisation;
-            False = unweighted, calibrated with Parseval (ppm^2/muHz).
 
     Returns:
         PSDData (frequency [muHz], psd).
     """
-    ls = LombScargle(t=lc.time, y=lc.flux, dy=lc.flux_err if weighted else None,
-                     fit_mean=False, center_data=True)
+    ls = LombScargle(t=lc.time, y=lc.flux, fit_mean=False, center_data=True)
     nyq = nyquist(lc.time)
     df = frequency_resolution(lc.time, nyq, oversampling, width_for_wf)
     freq = np.arange(df / oversampling, nyq, df / oversampling)
     power = ls.power(freq, normalization="psd", method="fast", assume_regular_frequency=True)
     freq = freq * DAY_TO_MUHZ
-    if not weighted:
-        power = power * np.var(lc.flux) / (np.sum(power) * (freq[1] - freq[0]))
+    power = power * np.var(lc.flux) / (np.sum(power) * (freq[1] - freq[0]))
     return PSDData(frequency=freq, psd=power)
 
 
@@ -160,44 +156,3 @@ def averaged_psd(lc: LightCurveData, chunk_days: float = 90.0, overlap: float = 
     psd = np.median(stack, axis=0) if method == "median" else np.mean(stack, axis=0)
     logger.info("Averaged PSD from %d chunks of %.1f d (%s)", n_chunks, chunk_days, method)
     return PSDData(frequency=freq_grid * 1e6, psd=psd)
-
-
-# --------------------------------------------------------------------------------------
-# Kepler short-cadence cleaning
-# --------------------------------------------------------------------------------------
-# Spurious Kepler short-cadence frequencies (Van Cleve et al. 2016, table 5) and the
-# half-width of the replaced region as a fraction of the peak frequency.
-KEPLER_SC_SPURIOUS = {
-    86.8: 0.1,
-    370.4: 0.05,
-    2092.6: 0.05,
-    2265.6: 0.05,
-    2832.0: 0.05,
-    4428.4: 0.05,
-    4451.4: 0.05,
-    4531.1: 0.05,
-    5016.2: 0.02,
-}
-
-
-def clean_kepler_sc_psd(frequency, power, rng: np.random.Generator,
-                        peaks: dict = KEPLER_SC_SPURIOUS):
-    """Replace spurious Kepler short-cadence peaks with chi^2_2 noise.
-
-    Args:
-        frequency: frequency grid [muHz].
-        power: PSD.
-        rng: numpy random generator.
-        peaks: {peak frequency [muHz]: half-width as a fraction of the peak frequency}.
-
-    Returns:
-        Copy of power; the noise mean is the mean power next to each replaced region.
-    """
-    power = np.array(power, dtype=float, copy=True)
-    for peak, width in peaks.items():
-        tol = width * peak
-        mask = np.abs(frequency - peak) <= tol
-        if np.any(mask):
-            surrounding = (frequency > peak - 2 * tol) & (frequency < peak + 2 * tol) & ~mask
-            power[mask] = rng.exponential(scale=np.mean(power[surrounding]), size=mask.sum())
-    return power

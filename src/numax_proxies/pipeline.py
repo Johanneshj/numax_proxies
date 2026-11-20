@@ -18,7 +18,7 @@ from .config import GlobalConfig, load_config
 from .data import GaiaData, PSDData
 from .io import load_psd, save_lightcurve, save_psd
 from .methods import NumaxFromACF, NumaxFromCoV, numax_from_scaling_relations
-from .spectrum import averaged_psd, clean_kepler_sc_psd, periodogram
+from .spectrum import averaged_psd, periodogram
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +100,6 @@ class NumaxProxies:
 
         if self.psd_input.psd_file:
             self.psd = load_psd(self.psd_input.psd_file)
-            if self._clean_kepler_sc:
-                self.psd = PSDData(self.psd.frequency,
-                                   clean_kepler_sc_psd(self.psd.frequency, self.psd.psd, self.rng))
         elif self.psd_input.avg_psd_file:
             self.avg_psd = load_psd(self.psd_input.avg_psd_file)
         else:
@@ -131,11 +128,6 @@ class NumaxProxies:
                        self.star.target, option)
         return False
 
-    @property
-    def _clean_kepler_sc(self) -> bool:
-        """Blind Kepler SC cleaning? (only if clean_kepler_sc is true)."""
-        return bool(self.config.clean_kepler_sc)
-
     def _spectrum_from_lightcurve(self):
         """Load and process the light curve, then compute the PSD (and averaged PSD)."""
         cfg = self.config
@@ -156,7 +148,7 @@ class NumaxProxies:
             lc, trend = lcp.savgol_detrend(lc, cfg.savgol_window)
         self.lc = lc
 
-        self.psd = periodogram(lc, cfg.oversampling, cfg.width_for_wf, cfg.weight_psd_by_flux_err)
+        self.psd = periodogram(lc, cfg.oversampling, cfg.width_for_wf)
         if cfg.do_avg_psd:
             self.avg_psd = averaged_psd(lc, cfg.avg_psd_chunk, cfg.avg_psd_overlap,
                                         cfg.oversampling, cfg.avg_psd_method, cfg.n_threads)

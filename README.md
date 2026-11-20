@@ -96,8 +96,10 @@ optional checks:
 
 ## 🖼️ Example figures
 
-ACF (with the 2D ACF) and CoV for a red giant and a main-sequence star. Each line is one
-grid setting; dashed lines are the fitted ν<sub>max</sub>.
+ACF and CoV for a red giant (Kepler LC) and a main-sequence star (Kepler SC). The ACF
+figure shows the spectrum, the 2D ACF, the collapsed ACF and the PSPS comb check; the CoV
+figure shows the CoV curves and the PSPS comb check. Each line is one grid setting; dashed
+lines are the fitted ν<sub>max</sub>. In the PSPS panel the strongest peak sits at Δν.
 
 | | ACF | CoV |
 |---|---|---|
@@ -131,12 +133,10 @@ file. See `examples/KIC1872517.yaml` for a complete file.
 | add_noise, noise_std | false, 0.0 | inject white noise (ppm) |
 | oversampling | 1.0 | PSD oversampling (> 1 breaks the FAP tables) |
 | width_for_wf | null | spectral-window width used for the resolution |
-| weight_psd_by_flux_err | false | old normalisation, (flux/flux_err)² |
 | do_avg_psd | false | averaged PSD (breaks the FAP tables) |
 | avg_psd_chunk, avg_psd_overlap, avg_psd_method | 90.0, 0.0, median | chunk [d], overlap, median/mean |
 | artefact_cleaning | false | Kepler SC: clean detected artefacts |
 | artefact_fap, artefact_search_halfwidth, artefact_max_halfwidth | 0.01, 1.0, 3.0 | detection level; search / cleaning half-width [µHz] |
-| clean_kepler_sc | false | old blind cleaning (±5 % around every artefact) |
 | exclude_regions | [] | `[[lo, hi], ...]` [µHz] replaced by noise at the local level |
 | comb_check | off | Kepler SC: `near_artefacts` or `always` |
 | comb_check_fap, comb_check_tolerance, comb_check_distance | 0.01, 0.3, 0.25 | test level; PSPS search range Δν(1 ± tolerance); distance to an artefact [envelope FWHM] |
@@ -158,9 +158,9 @@ file. See `examples/KIC1872517.yaml` for a complete file.
 | overlap_scale | [5] | bins per bin width |
 | smoothing_factor | [1] | smoothing window [envelope FWHM] |
 | median_filter_factor | 2 ln 2 | running-median window [envelope FWHM] |
-| replace_below_min_freq | true | white noise below min_freq |
+| replace_below_min_freq | false | white noise below min_freq |
 | FAP_threshold | 95p0 | `95p0` or `99p0` |
-| significance_at_numax | false | require a significant bin within 1 FWHM of the fit |
+| significance_at_numax | true | require a significant bin within 1 FWHM of the fit |
 | plot, plot_log_scale | false | figures |
 | plot_comb_check | false | comb-check diagnostic panel (PSPS, oversampled by `psps_oversampling`) |
 | save_info, save_results | false | outputs |
