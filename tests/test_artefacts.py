@@ -74,3 +74,13 @@ def test_only_used_for_kepler_sc(rng, caplog):
         p.compute_numax_from_CoV()
     assert "only used for STAR.cadence 'Kepler_SC'" in caplog.text
     assert p.cov.comb_check_mode is None
+
+
+def test_oversampling_keeps_the_test_and_refines_spacing(rng):
+    from numax_proxies.artefacts import psps
+    psd = synthetic_psd(1000.0, 3.0, frequency=GRID, rng=rng)
+    a = psps(GRID, rel(psd.psd), 1000.0, oversampling=1)
+    b = psps(GRID, rel(psd.psd), 1000.0, oversampling=10)
+    assert a["comb"] == b["comb"] and a["z_max"] == b["z_max"]           # same test
+    np.testing.assert_allclose(b["z_fine"][::10][:a["z"].size], a["z"], atol=1e-9)
+    assert abs(b["spacing"] - 52.0) <= abs(a["spacing"] - 52.0) + 0.5

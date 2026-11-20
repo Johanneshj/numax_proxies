@@ -102,6 +102,7 @@ class ProcessingConfig:
     comb_check_fap: float = 0.01            # false-alarm probability of the comb test
     comb_check_tolerance: float = 0.3       # search 1/Delta-nu and 2/Delta-nu within +- 30 %
     comb_check_distance: float = 0.25       # near_artefacts: within this x envelope FWHM
+    psps_oversampling: int = 10             # PSPS plot and Delta-nu estimate (not the test)
 
     # misc
     query_gaia: bool = False
@@ -131,6 +132,9 @@ class ProcessingConfig:
         for name in ("artefact_fap", "comb_check_fap"):
             if not 0 < getattr(self, name) < 1:
                 raise ValueError(f"CONFIG.{name} must be in (0, 1)")
+        if int(self.psps_oversampling) != self.psps_oversampling or self.psps_oversampling < 1:
+            raise ValueError("CONFIG.psps_oversampling must be a positive integer")
+        self.psps_oversampling = int(self.psps_oversampling)
         if not 0 < self.comb_check_tolerance < 1:
             raise ValueError("CONFIG.comb_check_tolerance must be in (0, 1)")
         formats = [str(f).lower().lstrip(".") for f in np.atleast_1d(self.figure_format)]

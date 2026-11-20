@@ -174,26 +174,32 @@ def plot_psps_panel(ax, method):
     cfg = method.config
     numax = method.numax_estimate.n
     rel = method.normalized_power - (1.0 if method.name == "CoV" else 0.0)
-    r = psps(method.frequency, rel, numax, cfg.comb_check_tolerance, cfg.comb_check_fap)
+    r = psps(method.frequency, rel, numax, cfg.comb_check_tolerance, cfg.comb_check_fap,
+             oversampling=cfg.psps_oversampling)
     ax.set(xlabel=r"$t\,\Delta\nu(\nu_\mathrm{max})$", ylabel="PSPS", xlim=(0, 3))
     if r is None:
         ax.text(0.5, 0.5, "no numax", ha="center", va="center", transform=ax.transAxes)
         return
-    x = r["t"] * r["dnu"]
-    show = x <= 3
-    ax.plot(x[show], r["z"][show], c="k", lw=0.6)
+    x, xf = r["t"] * r["dnu"], r["t_fine"] * r["dnu"]
+    show, show_f = x <= 3, xf <= 3
+    ax.plot(xf[show_f], r["z_fine"][show_f], c="k", lw=0.6, zorder=2)
+    if cfg.psps_oversampling > 1:                     # the independent points of the test
+        ax.plot(x[show], r["z"][show], "o", c="k", ms=1.5, zorder=3)
     tol = cfg.comb_check_tolerance
     for m in (1.0, 2.0):
         ax.axvspan(m / (1 + tol), m / (1 - tol), color="tab:blue", alpha=0.12, lw=0)
     ax.axhline(r["threshold"], c="r", ls="--", lw=0.6)
-    k = np.flatnonzero(r["search"])[np.argmax(r["z"][r["search"]])]
-    ax.plot(x[k], r["z"][k], "o", ms=3, mfc="none", mec="r", mew=0.8)
+    fine = np.zeros(xf.size, dtype=bool)
+    for m in (1.0, 2.0):
+        fine |= (xf >= m / (1 + tol)) & (xf <= m / (1 - tol))
+    k = np.flatnonzero(fine)[np.argmax(r["z_fine"][fine])]
+    ax.plot(xf[k], r["z_fine"][k], "o", ms=3, mfc="none", mec="r", mew=0.8, zorder=4)
     verdict = (rf"comb, $\Delta\nu \approx$ {r['spacing']:.2f} {_mu()}Hz" if r["comb"]
                else "no comb")
     ax.text(0.98, 0.96, rf"$\nu_\mathrm{{max}}$ = {numax:.1f} {_mu()}Hz" + "\n" + verdict,
             ha="right", va="top", transform=ax.transAxes, fontsize=6,
             bbox=dict(facecolor="white", alpha=0.8, lw=0, pad=1))
-    ax.set_ylim(0, max(1.15 * np.max(r["z"][show][1:]), 1.3 * r["threshold"]))
+    ax.set_ylim(0, max(1.15 * np.max(r["z_fine"][show_f][1:]), 1.3 * r["threshold"]))
 
 
 def _draw_spectrum(ax, method):

@@ -111,7 +111,7 @@ def near_artefact(numax: float, distance: float = 0.25, artefacts=KEPLER_SC_ARTE
     return any(abs(nu0 - numax) <= distance * envelope_fwhm(numax) for nu0, _ in artefacts)
 
 
-def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
+def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0, oversampling=1):
     """Power spectrum of the power spectrum (PSPS) around numax, and the comb test on it.
 
     The relative power x = P / median - 1 within +- n_fwhm envelope FWHM of numax is
@@ -128,11 +128,14 @@ def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
         tolerance: relative search range around 1/Delta-nu and 2/Delta-nu.
         fap: false-alarm probability of the test.
         n_fwhm: half-width of the stretch of spectrum, in envelope FWHM.
+        oversampling: zero-padding factor for t_fine / z_fine (plot and spacing only; the
+            test uses the independent points t, z).
 
     Returns:
-        dict with t [1/muHz], z, search (bool mask), threshold, dnu (Delta-nu(numax)),
-        z_max, spacing (Delta-nu of the strongest peak in the search ranges [muHz]) and
-        comb (bool); None if the stretch is too short.
+        dict with t [1/muHz], z (independent points), search (bool mask), threshold,
+        dnu (Delta-nu(numax)), z_max, comb (bool), t_fine, z_fine (oversampled PSPS) and
+        spacing (Delta-nu of the strongest oversampled peak in the search ranges [muHz]);
+        None if the stretch is too short.
     """
     if not np.isfinite(numax) or numax <= 0:
         return None
@@ -158,9 +161,17 @@ def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
         return None
     k = np.flatnonzero(search)[np.argmax(z[search])]
     thr = max_exceedance_threshold(int(search.sum()), fap)
-    spacing = 1.0 / t[k] * (2.0 if t[k] > 1.5 / dnu else 1.0)   # back to Delta-nu
+    # oversampled PSPS (zero padding): same normalisation, equal to z at the original t
+    n_pad = n * max(int(oversampling), 1)
+    z_fine = np.abs(np.fft.rfft(x, n_pad)) ** 2 / (n * var)
+    t_fine = np.fft.rfftfreq(n_pad, d=df)
+    fine = np.zeros(t_fine.size, dtype=bool)
+    for m in (1.0, 2.0):
+        fine |= (t_fine >= m / (dnu * (1 + tolerance))) & (t_fine <= m / (dnu * (1 - tolerance)))
+    kf = np.flatnonzero(fine)[np.argmax(z_fine[fine])]
+    spacing = 1.0 / t_fine[kf] * (2.0 if t_fine[kf] > 1.5 / dnu else 1.0)   # back to Delta-nu
     return dict(t=t, z=z, search=search, threshold=thr, dnu=dnu, z_max=float(z[k]),
-                spacing=float(spacing), comb=bool(z[k] > thr))
+                comb=bool(z[k] > thr), t_fine=t_fine, z_fine=z_fine, spacing=float(spacing))
 
 
 def psps_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):

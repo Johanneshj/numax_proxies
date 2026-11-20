@@ -229,6 +229,7 @@ by the package (and of KEPSEISMIC/KASOC files); PSD files in other units are plo
 | artefact_fap, artefact_search_halfwidth, artefact_max_halfwidth | 0.01, 1.0, 3.0 | detection level; search and largest replaced half-width [µHz] (broad artefacts ×5) |
 | comb_check | off | Kepler SC: `near_artefacts` or `always` – PSPS comb test of every fitted ν<sub>max</sub> |
 | comb_check_fap, comb_check_tolerance, comb_check_distance | 0.01, 0.3, 0.25 | test level; search range around 1/Δν, 2/Δν; `near_artefacts` distance [envelope FWHM] |
+| psps_oversampling | 10 | zero padding of the PSPS for the plot and the Δν estimate (the comb test uses the independent points) |
 | query_gaia | false | Gaia DR3 Teff, logg, M, R, L for the scaling relations |
 | initial_numax | null | skip the automatic first guess (µHz) |
 | n_threads | null | Numba threads (null: Numba default) |
