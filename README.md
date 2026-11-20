@@ -137,8 +137,8 @@ In the PSPS panel the strongest peak sits at Δν.
 
 | | ACF | CoV | Comb scan |
 |---|---|---|---|
-| **Red giant**, KIC 11612603 (ν<sub>max</sub> = 86.0 µHz) | ![RG ACF](https://raw.githubusercontent.com/Johanneshj/numax_proxies/main/docs/figures/RG_ACF.png) | ![RG CoV](https://raw.githubusercontent.com/Johanneshj/numax_proxies/main/docs/figures/RG_CoV.png) | ![RG comb scan](https://raw.githubusercontent.com/Johanneshj/numax_proxies/main/docs/figures/RG_CombScan.png) |
-| **Main sequence**, KIC 6671492 (ν<sub>max</sub> = 728 µHz) | ![MS ACF](https://raw.githubusercontent.com/Johanneshj/numax_proxies/main/docs/figures/MS_ACF.png) | ![MS CoV](https://raw.githubusercontent.com/Johanneshj/numax_proxies/main/docs/figures/MS_CoV.png) | ![MS comb scan](https://raw.githubusercontent.com/Johanneshj/numax_proxies/main/docs/figures/MS_CombScan.png) |
+| **Red giant**, KIC 11612603 (ν<sub>max</sub> = 86.0 µHz) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) | ![RG comb scan](docs/figures/RG_CombScan.png) |
+| **Main sequence**, KIC 6671492 (ν<sub>max</sub> = 728 µHz) | ![MS ACF](docs/figures/MS_ACF.png) | ![MS CoV](docs/figures/MS_CoV.png) | ![MS comb scan](docs/figures/MS_CombScan.png) |
 
 ---
 
@@ -241,7 +241,33 @@ python scripts/make_fap_tables.py      # regenerate the FAP tables (~1.5 h)
 
 ## 📚 References
 
-Bell+2019 (MNRAS 483, 3022) · Huber+2009 (CoAst 160, 74) · Kallinger+2014 (A&A 570, A41) ·
-Mosser+2011 (A&A 525, L9) · Mosser+2012 (A&A 537, A30) ·
-Stello+2009 (MNRAS 400, L80) · Van Cleve+2016 (Kepler data characteristics handbook) ·
-Viani+2019 (ApJ 879, 33)
+**Methods**
+* Huber et al. 2009, CoAst 160, 74 – collapsed ACF, ν<sub>max</sub> from a Gaussian fit (SYD)
+* Bell, Hekker & Kuszlewicz 2019, MNRAS 482, 616 – coefficient of variation
+* Viani et al. 2019, ApJ 879, 33
+
+**Scaling relations and synthetic spectra**
+* Stello et al. 2009, MNRAS 400, L80 – Δν(ν<sub>max</sub>)
+* Mosser et al. 2011, A&A 525, L9 – mode pattern
+* Mosser et al. 2012, A&A 537, A30 – envelope width; background modelling matters
+* Kallinger et al. 2014, A&A 570, A41 – granulation background; background-model systematics in ν<sub>max</sub>
+
+**Δν and comb detection (PSPS, autocorrelation, comb scan)**
+* Mosser & Appourchaux 2009, A&A 508, 877 – envelope autocorrelation function, H0 test;
+  ν<sub>max</sub> first from where the autocorrelation signal is strongest
+* Hekker et al. 2010, MNRAS 402, 2049 – OCT pipeline, PSPS in windows of the spectrum
+* Mathur et al. 2010, arXiv:1003.4749 – A2Z pipeline, PSPS on sub-series
+* Verner & Roxburgh 2011, arXiv:1104.0631 – windowed autocorrelation of the power-to-background spectrum
+* Lund, Chaplin & Kjeldsen 2012, MNRAS 427, 1784 – significance testing of PS⊗PS at low S/N
+* Scargle 1982, ApJ 263, 835 – false-alarm probability of the highest of M independent peaks
+
+**Background and ν<sub>max</sub> systematics**
+* Sreenivas & Bedding 2024, MNRAS (arXiv:2401.17557) – ν<sub>max</sub> from the spectrum divided by
+  ν<sup>−2</sup>; calibrated 1.5 % offset
+
+**Related pipelines**
+* Chontos et al. 2022, arXiv:2108.00582 – pySYD
+* Gehan et al. 2023, arXiv:2303.03976 – FRA
+
+**Kepler short cadence**
+* Van Cleve et al. 2016 – Kepler data characteristics handbook (artefact frequencies)
