@@ -44,6 +44,7 @@ class NumaxProxies:
         self.avg_psd = None
         self.rng = np.random.default_rng(self.config.random_seed)
         self.artefact_report = []
+        self.dnu_estimates = {}
 
     @classmethod
     def read_yaml(cls, yaml_path: str) -> "NumaxProxies":
@@ -221,10 +222,40 @@ class NumaxProxies:
     # Output
     # ----------------------------------------------------------------------------------
     def plotting(self):
-        """Save the spectrum with all numax estimates."""
+        """Save the spectrum with all numax estimates (and PSPS.png if CONFIG.plot_psps)."""
         from .plotting import plot_spectrum_with_all_numax_estimates
         plot_spectrum_with_all_numax_estimates(self._spectrum_for_methods(), self.star,
                                                self.numax_estimates, self.config)
+        if self.config.plot_psps:
+            self.psps_delta_nu(plot=True)
+
+    def psps_delta_nu(self, plot: bool = False) -> dict:
+        """Delta-nu from the PSPS around the ACF and CoV numax (strongest peak near
+        1/Delta-nu or 2/Delta-nu).
+
+        Args:
+            plot: also save PSPS.png.
+
+        Returns:
+            {"dnu_ACF": muHz, "dnu_CoV": muHz} for the methods that were run and have a numax.
+        """
+        from .artefacts import psps
+        cfg, curves = self.config, []
+        for label, colour, method, offset in (("ACF", "forestgreen", getattr(self, "acf", None), 0.0),
+                                              ("CoV", "mediumorchid", getattr(self, "cov", None), 1.0)):
+            if method is None:
+                continue
+            numax = method.numax_estimate.n
+            r = psps(method.frequency, method.normalized_power - offset, numax,
+                     cfg.comb_check_tolerance, oversampling=cfg.psps_oversampling)
+            if r is None:
+                continue
+            self.dnu_estimates[f"dnu_{label}"] = r["spacing"]
+            curves.append((label, colour, numax, r))
+        if plot and curves:
+            from .plotting import plot_psps
+            plot_psps(curves, cfg, self.star.target)
+        return self.dnu_estimates
 
     @property
     def results(self) -> pd.DataFrame:

@@ -3,14 +3,17 @@
 Both are used only for STAR.cadence == "Kepler_SC" (switches in CONFIG):
   artefact_cleaning : at each listed artefact frequency, clean the spectrum only if a
                       significant narrow peak is found there (the oscillation comb survives).
-  comb_check        : after a fit, require a regular pattern (a comb with spacing ~Delta-nu)
-                      around the fitted numax, tested with the power spectrum of the power
-                      spectrum (PSPS); "near_artefacts" (only fits near a listed artefact) or
-                      "always".
+  comb_check        : after a fit, require a comb with spacing ~Delta-nu around the fitted
+                      numax, tested on the autocorrelation of that stretch of spectrum
+                      (Wiener-Khinchin): the lags near the spacing must be more correlated than
+                      the lags on either side; "near_artefacts" (only fits near a listed
+                      artefact) or "always".
+The power spectrum of the power spectrum (psps) is kept as a Delta-nu diagnostic.
 """
 import logging
 
 import numpy as np
+from scipy.stats import norm
 
 from .binning import running_median
 from .seismic import delta_nu, envelope_fwhm
@@ -112,7 +115,7 @@ def near_artefact(numax: float, distance: float = 0.25, artefacts=KEPLER_SC_ARTE
 
 
 def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0, oversampling=1):
-    """Power spectrum of the power spectrum (PSPS) around numax, and the comb test on it.
+    """Power spectrum of the power spectrum (PSPS) around numax: a Delta-nu diagnostic.
 
     The relative power x = P / median - 1 within +- n_fwhm envelope FWHM of numax is
     centred and Fourier transformed; z(t) = |FT_t|^2 / (N var(x)) is ~Exp(1) at every t > 0
@@ -174,16 +177,79 @@ def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0, overs
                 comb=bool(z[k] > thr), t_fine=t_fine, z_fine=z_fine, spacing=float(spacing))
 
 
-def psps_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
-    """Is there a comb with spacing ~Delta-nu(numax) around numax? (see psps)
+COMB_BANDS = ((0.90, 1.10, 1.0), (0.65, 0.85, -0.5), (1.15, 1.35, -0.5))   # (lo, hi, weight) x D
+COMB_STEP = 0.05                                  # trial spacings D in steps of 5 % of Delta-nu
+
+
+def acf_comb_test(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0):
+    """Is there a comb around numax? Wiener-Khinchin test on the stretch of spectrum.
+
+    The relative power x = P / median - 1 within +- n_fwhm envelope FWHM of numax is centred
+    and its autocorrelation r(k) = ACF(k) / ACF(0) computed (zero-padded FFT). For a trial
+    spacing D the contrast
+
+        C(D) = mean r over [0.9, 1.1] D  -  (mean r over [0.65, 0.85] D + mean r over
+               [1.15, 1.35] D) / 2
+
+    is large for a comb (modes coincide at a shift of D, fall in the gaps at 0.75 D and
+    1.25 D) and ~0 for a single spike or for broad, smooth excess (which raises all three
+    bands alike). C = sum_k a_k r(k) is linear in r, so its white-noise mean and variance are
+    analytic (E r = -(n-k)/n^2, Var r = (n-k)/n^2, lags conditioned on sum r = -1/2). D is
+    scanned over (1 +- tolerance) Delta-nu(numax) in steps of COMB_STEP; the largest
+    standardised contrast is compared with the Gaussian threshold for the maximum of that many
+    trials (Sidak, conservative for these positively correlated trials).
+
+    Args:
+        frequency: frequency grid [muHz] (uniform).
+        rel_power: P / median - 1 on that grid.
+        numax: fitted numax [muHz].
+        tolerance: relative range of trial spacings around Delta-nu(numax).
+        fap: false-alarm probability of the test.
+        n_fwhm: half-width of the stretch of spectrum, in envelope FWHM.
 
     Returns:
-        (comb present, z_max, spacing of the strongest PSPS peak [muHz]).
+        (comb present, largest standardised contrast, its spacing D [muHz]).
     """
-    r = psps(frequency, rel_power, numax, tolerance, fap, n_fwhm)
-    if r is None:
+    if not np.isfinite(numax) or numax <= 0:
         return False, np.nan, np.nan
-    return r["comb"], r["z_max"], r["spacing"]
+    sel = np.abs(frequency - numax) <= n_fwhm * envelope_fwhm(numax)
+    x = np.asarray(rel_power, dtype=float)[sel]
+    x = x[np.isfinite(x)]
+    n = x.size
+    if n < 16:
+        return False, np.nan, np.nan
+    x = x - x.mean()
+    nfft = 1 << int(np.ceil(np.log2(2 * n)))
+    corr = np.fft.irfft(np.abs(np.fft.rfft(x, nfft)) ** 2, nfft)[:n]
+    if not corr[0] > 0:
+        return False, np.nan, np.nan
+    r = corr / corr[0]
+    d = (n - np.arange(n)) / n ** 2                       # white-noise Var r(k) (= -E r(k))
+    df = frequency[1] - frequency[0]
+    dnu = float(delta_nu(numax))
+    trials = dnu * (1 + np.arange(-tolerance, tolerance + 1e-9, COMB_STEP))
+    best_z, best_d, n_trials = -np.inf, np.nan, 0
+    for spacing in trials:
+        a = np.zeros(n)
+        for lo, hi, w in COMB_BANDS:
+            k = np.arange(int(np.ceil(lo * spacing / df)), int(np.floor(hi * spacing / df)) + 1)
+            k = k[(k >= 1) & (k < n)]
+            if k.size == 0:
+                break
+            a[k] += w / k.size
+        else:
+            mu = -np.sum(a * d)
+            var = np.sum(a * a * d) - mu ** 2 * 2 * n / (n - 1)
+            if var <= 0:
+                continue
+            z = (np.sum(a * r) - mu) / np.sqrt(var)
+            n_trials += 1
+            if z > best_z:
+                best_z, best_d = z, spacing
+    if n_trials == 0:
+        return False, np.nan, np.nan
+    threshold = norm.isf(-np.expm1(np.log1p(-fap) / n_trials))
+    return bool(best_z > threshold), float(best_z), float(best_d)
 
 
 class CombChecker:
@@ -194,7 +260,7 @@ class CombChecker:
         rel_power: P / median - 1.
         mode: "near_artefacts" (test only fits within distance x envelope FWHM of a listed
             artefact) or "always".
-        tolerance, fap: see psps_comb_test.
+        tolerance, fap: see acf_comb_test.
         distance: see near_artefact.
     """
 
@@ -213,7 +279,7 @@ class CombChecker:
             return True
         key = int(round(np.log(numax) * 1000))                 # 0.1 % steps in numax
         if key not in self._cache:
-            self._cache[key] = psps_comb_test(self.frequency, self.rel_power,
-                                              float(np.exp(key / 1000)), self.tolerance,
-                                              self.fap)[0]
+            self._cache[key] = acf_comb_test(self.frequency, self.rel_power,
+                                             float(np.exp(key / 1000)), self.tolerance,
+                                             self.fap)[0]
         return self._cache[key]

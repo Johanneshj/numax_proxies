@@ -102,7 +102,8 @@ class ProcessingConfig:
     comb_check_fap: float = 0.01            # false-alarm probability of the comb test
     comb_check_tolerance: float = 0.3       # search 1/Delta-nu and 2/Delta-nu within +- 30 %
     comb_check_distance: float = 0.25       # near_artefacts: within this x envelope FWHM
-    psps_oversampling: int = 10             # PSPS plot and Delta-nu estimate (not the test)
+    plot_psps: bool = False                 # PSPS.png: PSPS around the ACF and CoV numax (Delta-nu)
+    psps_oversampling: int = 10             # zero padding of the PSPS (plot and Delta-nu estimate)
 
     # misc
     query_gaia: bool = False
@@ -157,7 +158,6 @@ class _MethodConfig:
     significance_at_numax: bool = False     # true: a significant bin must lie within 1 FWHM of numax
     plot: bool = False
     plot_log_scale: bool = False
-    plot_psps: bool = False                 # add the PSPS (comb check) around numax to the figure
     save_info: bool = False                 # all_data.pkl.gz with every grid setting
     save_results: bool = False              # numax_estimates.txt
 

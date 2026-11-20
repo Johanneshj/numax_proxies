@@ -19,7 +19,6 @@ except ImportError:  # style is optional
     pass
 
 COLUMN_WIDTH = 8.8 / 2.54          # A&A column [inch]
-SIDE_CAPTION_WIDTH = 12.0 / 2.54   # A&A figure with side caption [inch]
 DPI = 300                          # png
 PDF_RASTER_DPI = 600               # rasterised parts (spectra, 2D ACF) inside pdf files
 AA_RC = {                          # applied only while the package draws a figure
@@ -159,49 +158,6 @@ def plot_acf_map(ax, method):
             bbox=dict(facecolor="white", alpha=0.7, lw=0, pad=1))
 
 
-def plot_psps_panel(ax, method):
-    """Draw the power spectrum of the power spectrum (PSPS) around the method's numax.
-
-    x axis: t x Delta-nu(numax), so a comb gives peaks near 1 and 2 (shaded: the search ranges
-    of the comb check); dashed: its threshold.
-
-    Args:
-        ax: matplotlib axes.
-        method: NumaxFromACF or NumaxFromCoV after compute().
-    """
-    from .artefacts import psps
-
-    cfg = method.config
-    numax = method.numax_estimate.n
-    rel = method.normalized_power - (1.0 if method.name == "CoV" else 0.0)
-    r = psps(method.frequency, rel, numax, cfg.comb_check_tolerance, cfg.comb_check_fap,
-             oversampling=cfg.psps_oversampling)
-    ax.set(xlabel=r"$t\,\Delta\nu(\nu_\mathrm{max})$", ylabel="PSPS", xlim=(0, 3))
-    if r is None:
-        ax.text(0.5, 0.5, "no numax", ha="center", va="center", transform=ax.transAxes)
-        return
-    x, xf = r["t"] * r["dnu"], r["t_fine"] * r["dnu"]
-    show, show_f = x <= 3, xf <= 3
-    ax.plot(xf[show_f], r["z_fine"][show_f], c="k", lw=0.6, zorder=2)
-    if cfg.psps_oversampling > 1:                     # the independent points of the test
-        ax.plot(x[show], r["z"][show], "o", c="k", ms=1.5, zorder=3)
-    tol = cfg.comb_check_tolerance
-    for m in (1.0, 2.0):
-        ax.axvspan(m / (1 + tol), m / (1 - tol), color="tab:blue", alpha=0.12, lw=0)
-    ax.axhline(r["threshold"], c="r", ls="--", lw=0.6)
-    fine = np.zeros(xf.size, dtype=bool)
-    for m in (1.0, 2.0):
-        fine |= (xf >= m / (1 + tol)) & (xf <= m / (1 - tol))
-    k = np.flatnonzero(fine)[np.argmax(r["z_fine"][fine])]
-    ax.plot(xf[k], r["z_fine"][k], "o", ms=3, mfc="none", mec="r", mew=0.8, zorder=4)
-    verdict = (rf"comb, $\Delta\nu \approx$ {r['spacing']:.2f} {_mu()}Hz" if r["comb"]
-               else "no comb")
-    ax.text(0.98, 0.96, rf"$\nu_\mathrm{{max}}$ = {numax:.1f} {_mu()}Hz" + "\n" + verdict,
-            ha="right", va="top", transform=ax.transAxes, fontsize=6,
-            bbox=dict(facecolor="white", alpha=0.8, lw=0, pad=1))
-    ax.set_ylim(0, max(1.15 * np.max(r["z_fine"][show_f][1:]), 1.3 * r["threshold"]))
-
-
 def _draw_spectrum(ax, method):
     """PSD and running median of an ACF/CoV method."""
     ax.loglog(method.frequency, method.power, c="gray", lw=0.4, label="spectrum", rasterized=True)
@@ -239,50 +195,30 @@ def _draw_cacf(ax, method):
     ax.set(xlabel=_freq_label(), ylabel=ylabel)
 
 
-def _right_axis(ax):
-    """Ticks and label of the y axis on the right (right column of a 2 x 2 figure)."""
-    ax.yaxis.tick_right()
-    ax.yaxis.set_label_position("right")
-
-
 @_aa_style
 def plot_acf(method):
-    """Save ACF: spectrum, CACF curves with thresholds and fits, and optionally the 2D ACF
-    (plot_2dacf) and the PSPS around numax (plot_psps). With all four panels: a 2 x 2
-    figure 12 cm wide (A&A side caption); otherwise one 8.8 cm column.
+    """Save ACF: spectrum, optionally the 2D ACF (plot_2dacf), and the CACF curves with
+    thresholds and fits; one A&A column.
 
     Args:
         method: NumaxFromACF after compute().
     """
     cfg, results = method.cfg, method.results
-    show_map, show_psps = cfg.plot_2dacf is not False, bool(cfg.plot_psps)
-    if show_map and show_psps:
-        fig, a = plt.subplots(2, 2, figsize=(SIDE_CAPTION_WIDTH, 4.4))
-        ax_spec, ax_map, ax_cacf, ax_psps = a[0, 0], a[0, 1], a[1, 0], a[1, 1]
-        _right_axis(ax_map)
-        _right_axis(ax_psps)
-    else:
-        names = ["spec"] + (["map"] if show_map else []) + ["cacf"] + (["psps"] if show_psps else [])
-        fig, a = plt.subplots(len(names), 1, figsize=(COLUMN_WIDTH, 2.3 * len(names)))
-        panels = dict(zip(names, a))
-        ax_spec, ax_cacf = panels["spec"], panels["cacf"]
-        ax_map, ax_psps = panels.get("map"), panels.get("psps")
-
-    _draw_spectrum(ax_spec, method)
-    _draw_cacf(ax_cacf, method)
+    show_map = cfg.plot_2dacf is not False
+    names = ["spec"] + (["map"] if show_map else []) + ["cacf"]
+    fig, a = plt.subplots(len(names), 1, figsize=(COLUMN_WIDTH, 2.3 * len(names)))
+    panels = dict(zip(names, a))
+    _draw_spectrum(panels["spec"], method)
+    _draw_cacf(panels["cacf"], method)
     xmax = max(np.max(d["bin_centers"]) for d in results.values())
-    for ax in [ax_cacf] + ([ax_map] if show_map else []):
+    for name in names[1:]:
         if cfg.plot_log_scale:
-            ax.set_xscale("log")
-        _set_xlim(ax, cfg, xmax)
+            panels[name].set_xscale("log")
+        _set_xlim(panels[name], cfg, xmax)
     if show_map:
-        plot_acf_map(ax_map, method)
-        if cfg.plot_log_scale:
-            ax_map.set_xscale("log")
-        _set_xlim(ax_map, cfg, xmax)
-        ax_map.set_xlabel(_freq_label("bin center"))
-    if show_psps:
-        plot_psps_panel(ax_psps, method)
+        plot_acf_map(panels["map"], method)
+        _set_xlim(panels["map"], cfg, xmax)
+        panels["map"].set_xlabel(_freq_label("bin center"))
     fig.tight_layout()
     _save(fig, method.config, method.id, "ACF")
 
@@ -290,18 +226,13 @@ def plot_acf(method):
 # --------------------------------------------------------------------------------------
 @_aa_style
 def plot_cov(method):
-    """Save CoVs: CoV curves, thresholds, fits and the CoV upper limit; with plot_psps, the
-    PSPS around numax below.
+    """Save CoVs: CoV curves, thresholds, fits and the CoV upper limit.
 
     Args:
         method: NumaxFromCoV after compute().
     """
     cfg, results = method.cfg, method.results
-    if cfg.plot_psps:
-        fig, (ax, ax_psps) = plt.subplots(2, 1, figsize=(COLUMN_WIDTH, 4.8),
-                                          gridspec_kw=dict(height_ratios=[1.4, 1]))
-    else:
-        fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 2.8))
+    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 2.8))
     alpha = 0.25
     for data in results.values():
         bcs = np.asarray(data["bin_centers"])
@@ -333,8 +264,6 @@ def plot_cov(method):
     if cfg.plot_log_scale:
         ax.set_xscale("log")
     _set_xlim(ax, cfg, max(np.max(d["bin_centers"]) for d in results.values()))
-    if cfg.plot_psps:
-        plot_psps_panel(ax_psps, method)
     fig.tight_layout()
     _save(fig, method.config, method.id, "CoVs")
 
@@ -375,3 +304,38 @@ def plot_spectrum_with_all_numax_estimates(psd, star, numax_estimates, config):
     ax.legend(loc="lower left", title=f"{star.target} " + r"$\nu_\mathrm{max}$ " + f"[{_mu()}Hz]")
     fig.tight_layout()
     _save(fig, config, star.target, "full_spectrum_with_all_estimates")
+
+
+# --------------------------------------------------------------------------------------
+@_aa_style
+def plot_psps(curves, config, target):
+    """Save PSPS: power spectrum of the power spectrum around each method's numax against
+    the period 1/t (as in Viani et al. 2019), with Delta-nu / 2 (dashed) and Delta-nu (dotted)
+    from the strongest peak.
+
+    Args:
+        curves: [(label, colour, numax [muHz], psps dict from artefacts.psps)].
+        config: ProcessingConfig.
+        target: star name.
+    """
+    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 2.8))
+    d_max = max(c[3]["dnu"] for c in curves)
+    for label, colour, numax, r in curves:
+        good = r["t_fine"] > 0
+        period = 1.0 / r["t_fine"][good]
+        show = (period >= 0.2 * d_max) & (period <= 1.4 * d_max)
+        ax.plot(period[show], r["z_fine"][good][show], c=colour, lw=0.7,
+                label=rf"{label}: $\nu_\mathrm{{max}}$ = {numax:.1f}, "
+                      rf"$\Delta\nu$ = {r['spacing']:.2f} {_mu()}Hz")
+        ax.axvline(r["spacing"] / 2, c=colour, ls="--", lw=0.6)
+        ax.axvline(r["spacing"], c=colour, ls=":", lw=0.6)
+    handles, labels = ax.get_legend_handles_labels()
+    handles += [Line2D([0], [0], color="0.4", ls="--", lw=0.6),
+                Line2D([0], [0], color="0.4", ls=":", lw=0.6)]
+    labels += [r"$\Delta\nu/2$", r"$\Delta\nu$"]
+    ax.legend(handles, labels, loc="upper right")
+    ax.set(xlabel=_freq_label("period"), ylabel="PSPS", xlim=(0.2 * d_max, 1.4 * d_max))
+    ax.set_ylim(bottom=0)
+    ax.text(0.02, 0.96, str(target), ha="left", va="top", transform=ax.transAxes, fontsize=7)
+    fig.tight_layout()
+    _save(fig, config, target, "PSPS")

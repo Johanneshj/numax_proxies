@@ -4,8 +4,8 @@ import logging
 import numpy as np
 
 from numax_proxies import NumaxProxies
-from numax_proxies.artefacts import (CombChecker, clean_detected_artefacts,
-                                     max_exceedance_threshold, near_artefact, psps_comb_test)
+from numax_proxies.artefacts import (CombChecker, acf_comb_test, clean_detected_artefacts,
+                                     max_exceedance_threshold, near_artefact, psps)
 from numax_proxies.binning import running_median
 from numax_proxies.synthetic import synthetic_psd
 
@@ -40,20 +40,22 @@ def test_pure_noise_is_not_cleaned(rng):
     np.testing.assert_array_equal(cleaned, P)
 
 
-def test_comb_test_finds_comb_not_spike(rng):
-    psd = synthetic_psd(1000.0, 3.0, frequency=GRID, rng=rng)
-    ok, z, spacing = psps_comb_test(GRID, rel(psd.psd), 1000.0)
+def test_comb_test_finds_comb_not_spike_or_broad_excess(rng):
+    psd = synthetic_psd(1000.0, 1.0, frequency=GRID, linewidth=1.5, rng=rng)
+    ok, z, spacing = acf_comb_test(GRID, rel(psd.psd), 1000.0)
     assert ok and abs(spacing - 52.0) < 3
     P = rng.exponential(size=GRID.size)
     j = np.argmin(np.abs(GRID - 4531.1))
     P[j - 1:j + 2] += [20, 80, 20]
-    assert not psps_comb_test(GRID, rel(P), 4531.1)[0]
+    assert not acf_comb_test(GRID, rel(P), 4531.1)[0]            # single spike
+    smooth = 1 + 2 * np.exp(-0.5 * ((GRID - 1500) / 150) ** 2)  # broad hump, no comb
+    assert not acf_comb_test(GRID, rel(rng.exponential(size=GRID.size) * smooth), 1500.0)[0]
 
 
 def test_comb_test_false_alarm_rate(rng):
-    hits = sum(psps_comb_test(GRID, rel(rng.exponential(size=GRID.size)), 1500.0, fap=0.05)[0]
-               for _ in range(200))
-    assert hits / 200 < 0.1                                     # 5 % expected
+    hits = sum(acf_comb_test(GRID, rel(rng.exponential(size=GRID.size)), 1500.0, fap=0.05)[0]
+               for _ in range(300))
+    assert 0.02 < hits / 300 < 0.09                             # 5 % expected
 
 
 def test_checker_modes():
@@ -76,11 +78,23 @@ def test_only_used_for_kepler_sc(rng, caplog):
     assert p.cov.comb_check_mode is None
 
 
-def test_oversampling_keeps_the_test_and_refines_spacing(rng):
-    from numax_proxies.artefacts import psps
+def test_psps_oversampling_refines_spacing(rng):
     psd = synthetic_psd(1000.0, 3.0, frequency=GRID, rng=rng)
     a = psps(GRID, rel(psd.psd), 1000.0, oversampling=1)
     b = psps(GRID, rel(psd.psd), 1000.0, oversampling=10)
-    assert a["comb"] == b["comb"] and a["z_max"] == b["z_max"]           # same test
+    assert a["z_max"] == b["z_max"]                                      # same points
     np.testing.assert_allclose(b["z_fine"][::10][:a["z"].size], a["z"], atol=1e-9)
     assert abs(b["spacing"] - 52.0) <= abs(a["spacing"] - 52.0) + 0.5
+
+
+def test_psps_figure(tmp_path, rng):
+    psd = synthetic_psd(60.0, 5.0, rng=rng)
+    grid = {"width_factor": [3], "overlap_scale": [5], "smoothing_factor": [1.0]}
+    p = NumaxProxies.from_psd(psd.frequency, psd.psd,
+                              {"ACF_CONFIG": grid, "COV_CONFIG": grid,
+                               "CONFIG": {"plot_psps": True, "results_directory": str(tmp_path)}})
+    p.compute_numax_from_acf()
+    p.compute_numax_from_CoV()
+    p.plotting()
+    assert list(tmp_path.rglob("PSPS.png"))
+    assert abs(p.dnu_estimates["dnu_CoV"] - 6.1) < 0.6           # Delta-nu(60) = 6.1 muHz

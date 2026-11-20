@@ -101,11 +101,15 @@ checks can be switched on (they are ignored, with a warning, for other cadences)
   above 3× the mean power (at most ±`artefact_max_halfwidth` µHz; broad artefacts ×5) are
   replaced by χ²₂ noise. The oscillation comb is left alone, at worst one mode is lost.
 * `comb_check` (`near_artefacts` or `always`): after a fit, the stretch of relative power
-  within ±1 envelope FWHM of the fitted ν<sub>max</sub> must show a comb. Its power spectrum
-  (PSPS, normalised so that white noise is Exp(1) in every bin) is searched near 1/Δν and 2/Δν
-  (±`comb_check_tolerance`); a peak above the max-of-M threshold at `comb_check_fap` means a
-  comb, a single spurious peak gives a flat PSPS. A fit without a comb is repeated with
-  ±1 FWHM around it excluded (up to 3 times); otherwise no result (CoV `fit_type: no_comb`).
+  within ±1 envelope FWHM of the fitted ν<sub>max</sub> must show a comb. Its autocorrelation
+  r(k) (Wiener–Khinchin) is tested with the contrast between the lags within [0.9, 1.1] D and
+  those within [0.65, 0.85] D and [1.15, 1.35] D, for trial spacings D within
+  ±`comb_check_tolerance` of Δν(ν<sub>max</sub>): a comb correlates at D and anticorrelates in
+  between, while a single spurious peak or broad smooth excess raises all three bands alike.
+  The contrast is linear in r(k), so its white-noise mean and variance are analytic; the largest
+  standardised contrast is compared with the Gaussian threshold for that many trials at
+  `comb_check_fap`. A fit without a comb is repeated with ±1 FWHM around it excluded (up to
+  3 times); otherwise no result (CoV `fit_type: no_comb`).
   `near_artefacts` tests only fits within `comb_check_distance` envelope FWHM of a listed
   artefact.
 
@@ -227,9 +231,10 @@ by the package (and of KEPSEISMIC/KASOC files); PSD files in other units are plo
 | clean_kepler_sc | false | blind cleaning of ±5 % around every listed Kepler SC artefact |
 | artefact_cleaning | false | Kepler SC: clean listed artefacts only where a narrow peak is detected |
 | artefact_fap, artefact_search_halfwidth, artefact_max_halfwidth | 0.01, 1.0, 3.0 | detection level; search and largest replaced half-width [µHz] (broad artefacts ×5) |
-| comb_check | off | Kepler SC: `near_artefacts` or `always` – PSPS comb test of every fitted ν<sub>max</sub> |
-| comb_check_fap, comb_check_tolerance, comb_check_distance | 0.01, 0.3, 0.25 | test level; search range around 1/Δν, 2/Δν; `near_artefacts` distance [envelope FWHM] |
-| psps_oversampling | 10 | zero padding of the PSPS for the plot and the Δν estimate (the comb test uses the independent points) |
+| comb_check | off | Kepler SC: `near_artefacts` or `always` – comb test (autocorrelation contrast) of every fitted ν<sub>max</sub> |
+| comb_check_fap, comb_check_tolerance, comb_check_distance | 0.01, 0.3, 0.25 | test level; range of trial spacings around Δν(ν<sub>max</sub>); `near_artefacts` distance [envelope FWHM] |
+| plot_psps | false | PSPS.png: power spectrum of the power spectrum around the ACF and CoV ν<sub>max</sub> against the period (strongest peak at Δν/2, as in Viani et al. 2019); Δν estimates in `dnu_estimates` |
+| psps_oversampling | 10 | zero padding of the PSPS (plot and Δν estimate) |
 | query_gaia | false | Gaia DR3 Teff, logg, M, R, L for the scaling relations |
 | initial_numax | null | skip the automatic first guess (µHz) |
 | n_threads | null | Numba threads (null: Numba default) |
@@ -255,7 +260,6 @@ by the package (and of KEPSEISMIC/KASOC files); PSD files in other units are plo
 | plot_2dacf | false | ACF only: 2D ACF panel in ACF.png (lag vs bin centre; lag in Δν(ν<sub>c</sub>) for `delta_nu`, in µHz for `all_lags`); `true` = first grid setting, or `[overlap_scale, width_factor]` |
 | significance_at_numax | false | true: a significant bin must lie within 1 FWHM of the fitted numax |
 | plot, plot_log_scale | false | figures |
-| plot_psps | false | add the PSPS around the fitted ν<sub>max</sub> (comb check): below the CoV curves; for the ACF with `plot_2dacf` a 2 × 2 figure 12 cm wide (A&A side caption) |
 | save_info | false | `all_data.pkl.gz` with every grid setting |
 | save_results | false | `numax_estimates.txt` |
 | max_acf_fit_iterations, n_sigma_numax_acf | 1, 2.0 | ACF only |
