@@ -93,6 +93,7 @@ class ProcessingConfig:
     avg_psd_method: Literal["median", "mean"] = "median"
     clean_kepler_sc: Optional[bool] = False  # blind Kepler SC cleaning (+-5 % around each
                                              # artefact); only if true (null = false)
+    exclude_regions: list = field(default_factory=list)   # [[lo, hi], ...] muHz replaced by noise
     # Kepler SC checks, used only if STAR.cadence == "Kepler_SC":
     artefact_cleaning: bool = False         # clean listed artefacts only where a peak is detected
     artefact_fap: float = 0.01              # false-alarm probability of a detection, per artefact
@@ -138,6 +139,10 @@ class ProcessingConfig:
         self.psps_oversampling = int(self.psps_oversampling)
         if not 0 < self.comb_check_tolerance < 1:
             raise ValueError("CONFIG.comb_check_tolerance must be in (0, 1)")
+        regions = self.exclude_regions or []
+        if not all(len(r) == 2 and 0 <= r[0] < r[1] for r in regions):
+            raise ValueError("CONFIG.exclude_regions must be [[lo, hi], ...] with 0 <= lo < hi")
+        self.exclude_regions = [[float(lo), float(hi)] for lo, hi in regions]
         formats = [str(f).lower().lstrip(".") for f in np.atleast_1d(self.figure_format)]
         if not formats or any(f not in ("png", "pdf") for f in formats):
             raise ValueError("CONFIG.figure_format must be 'png', 'pdf' or a list of them")
@@ -158,7 +163,7 @@ class _MethodConfig:
     significance_at_numax: bool = False     # true: a significant bin must lie within 1 FWHM of numax
     plot: bool = False
     plot_log_scale: bool = False
-    plot_comb_check: bool = False           # add the comb-check diagnostic (autocorrelation) panel
+    plot_comb_check: bool = False           # add the comb-check diagnostic (PSPS) panel
     save_info: bool = False                 # all_data.pkl.gz with every grid setting
     save_results: bool = False              # numax_estimates.txt
 

@@ -61,6 +61,7 @@ CONFIG:
   figure_format: png          # png, pdf or [png, pdf]
   # Kepler short cadence only (STAR.cadence: Kepler_SC)
   artefact_cleaning: false    # clean listed artefacts where a narrow peak is detected
+  exclude_regions: []         # [[lo, hi], ...] muHz replaced by noise (Kepler SC: [[359, 372]])
   comb_check: 'off'           # off | near_artefacts | always: PSPS comb test of fitted numax
 
 ACF_CONFIG:

@@ -4,7 +4,7 @@ import logging
 import numpy as np
 
 from numax_proxies import NumaxProxies
-from numax_proxies.artefacts import (CombChecker, acf_comb_test, clean_detected_artefacts,
+from numax_proxies.artefacts import (CombChecker, clean_detected_artefacts, replace_regions,
                                      max_exceedance_threshold, near_artefact, psps)
 from numax_proxies.binning import running_median
 from numax_proxies.synthetic import synthetic_psd
@@ -40,21 +40,25 @@ def test_pure_noise_is_not_cleaned(rng):
     np.testing.assert_array_equal(cleaned, P)
 
 
+def comb(numax, P, fap=0.01):
+    r = psps(GRID, rel(P), numax, fap=fap)
+    return r["comb"], r["spacing"]
+
+
 def test_comb_test_finds_comb_not_spike_or_broad_excess(rng):
     psd = synthetic_psd(1000.0, 1.0, frequency=GRID, linewidth=1.5, rng=rng)
-    ok, z, spacing = acf_comb_test(GRID, rel(psd.psd), 1000.0)
+    ok, spacing = comb(1000.0, psd.psd)
     assert ok and abs(spacing - 52.0) < 3
     P = rng.exponential(size=GRID.size)
     j = np.argmin(np.abs(GRID - 4531.1))
     P[j - 1:j + 2] += [20, 80, 20]
-    assert not acf_comb_test(GRID, rel(P), 4531.1)[0]            # single spike
+    assert not comb(4531.1, P)[0]                                 # single spike
     smooth = 1 + 2 * np.exp(-0.5 * ((GRID - 1500) / 150) ** 2)  # broad hump, no comb
-    assert not acf_comb_test(GRID, rel(rng.exponential(size=GRID.size) * smooth), 1500.0)[0]
+    assert not comb(1500.0, rng.exponential(size=GRID.size) * smooth)[0]
 
 
 def test_comb_test_false_alarm_rate(rng):
-    hits = sum(acf_comb_test(GRID, rel(rng.exponential(size=GRID.size)), 1500.0, fap=0.05)[0]
-               for _ in range(300))
+    hits = sum(comb(1500.0, rng.exponential(size=GRID.size), fap=0.05)[0] for _ in range(300))
     assert 0.02 < hits / 300 < 0.09                             # 5 % expected
 
 
@@ -98,3 +102,12 @@ def test_psps_figure(tmp_path, rng):
     p.plotting()
     assert list(tmp_path.rglob("PSPS.png"))
     assert abs(p.dnu_estimates["dnu_CoV"] - 6.1) < 0.6           # Delta-nu(60) = 6.1 muHz
+
+
+def test_replace_regions(rng):
+    P = rng.exponential(size=GRID.size)
+    P[(GRID > 362) & (GRID < 369)] *= 10                        # broad excess
+    out = replace_regions(GRID, P, [[359, 372]], rng)
+    inside = (GRID >= 359) & (GRID <= 372)
+    np.testing.assert_array_equal(out[~inside], P[~inside])
+    assert 0.8 < out[inside].mean() < 1.25

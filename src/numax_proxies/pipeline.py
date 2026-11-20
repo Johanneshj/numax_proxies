@@ -115,6 +115,12 @@ class NumaxProxies:
                 self.psd.frequency, self.psd.psd, self.rng, cfg.artefact_fap,
                 cfg.artefact_search_halfwidth, cfg.artefact_max_halfwidth)
             self.psd = PSDData(self.psd.frequency, power)
+        if self.config.exclude_regions and self.psd is not None:
+            from .artefacts import replace_regions
+            self.psd = PSDData(self.psd.frequency, replace_regions(
+                self.psd.frequency, self.psd.psd, self.config.exclude_regions, self.rng))
+            logger.info("%s: replaced %s muHz by noise", self.star.target,
+                        self.config.exclude_regions)
         return self
 
     def _kepler_sc_checks(self, option: str) -> bool:

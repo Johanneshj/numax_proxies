@@ -160,44 +160,52 @@ def plot_acf_map(ax, method):
 
 
 def plot_comb_check_panel(ax, method):
-    """Draw the comb check (Wiener-Khinchin) around the method's numax.
+    """Draw the comb check (PSPS) around the method's numax.
 
-    r(k) of the stretch within +- 1 envelope FWHM of numax against the shift in units of the
-    best trial spacing D; shaded: the central band (red) and the side bands (blue), with their
-    mean r (horizontal lines). The contrast of the two is the test statistic.
+    PSPS against 2/t, so the strongest peak (period Delta-nu / 2) sits at Delta-nu:
+    oversampled (line, psps_oversampling) and the independent points the test uses (dots);
+    shaded: the search ranges around Delta-nu and 2 Delta-nu of numax; dashed: the
+    threshold; circle: the tested maximum; dotted: the Delta-nu estimate.
 
     Args:
         ax: matplotlib axes.
         method: NumaxFromACF or NumaxFromCoV after compute().
     """
-    from .artefacts import acf_comb_details
+    from .artefacts import psps
 
     cfg = method.config
     numax = method.numax_estimate.n
     rel = method.normalized_power - (1.0 if method.name == "CoV" else 0.0)
-    d = acf_comb_details(method.frequency, rel, numax, cfg.comb_check_tolerance,
-                         cfg.comb_check_fap)
-    ax.set(xlabel=r"shift [$D$]", ylabel=r"$r(k)$", xlim=(0.4, 1.6))
-    if d is None:
+    r = psps(method.frequency, rel, numax, cfg.comb_check_tolerance, cfg.comb_check_fap,
+             oversampling=cfg.psps_oversampling)
+    ax.set(xlabel=_freq_label("$2/t$"), ylabel=r"PS $\otimes$ PS")
+    if r is None:
         ax.text(0.5, 0.5, "no numax", ha="center", va="center", transform=ax.transAxes)
         return
-    x = d["lag"] / d["spacing"]
-    show = (x >= 0.4) & (x <= 1.6)
-    ax.axhline(0, c="0.6", lw=0.5)
-    ax.plot(x[show], d["r"][show], c="k", lw=0.5, rasterized=True)
-    for (lo, hi, mean), colour in zip(d["bands"], ("tab:red", "tab:blue", "tab:blue")):
-        lo, hi = lo / d["spacing"], hi / d["spacing"]
-        ax.axvspan(lo, hi, color=colour, alpha=0.15, lw=0)
-        ax.plot([lo, hi], [mean, mean], c=colour, lw=1.2)
-    verdict = "comb" if d["comb"] else "no comb"
-    ax.text(0.98, 0.96,
-            rf"$\nu_\mathrm{{max}}$ = {numax:.1f} {_mu()}Hz, $D$ = {d['spacing']:.2f} {_mu()}Hz"
-            + "\n" + rf"contrast {d['z']:.1f} vs {d['threshold']:.1f}: {verdict}",
+    lo, hi = 0.5 * r["dnu"], 2.6 * r["dnu"]
+    good = r["t_fine"] > 0
+    x_f, z_f = 2.0 / r["t_fine"][good], r["z_fine"][good]
+    show_f = (x_f >= lo) & (x_f <= hi)
+    ax.plot(x_f[show_f], z_f[show_f], c="k", lw=0.5)
+    good = r["t"] > 0
+    x, z = 2.0 / r["t"][good], r["z"][good]
+    show = (x >= lo) & (x <= hi)
+    ax.plot(x[show], z[show], "o", c="k", ms=1.2, mew=0)
+    tol = cfg.comb_check_tolerance
+    for m in (1.0, 2.0):
+        ax.axvspan(m * r["dnu"] * (1 - tol), m * r["dnu"] * (1 + tol), color="tab:blue",
+                   alpha=0.12, lw=0)
+    ax.axhline(r["threshold"], c="r", ls="--", lw=0.6)
+    k = np.flatnonzero(r["search"])[np.argmax(r["z"][r["search"]])]
+    ax.plot(2.0 / r["t"][k], r["z"][k], "o", ms=3, mfc="none", mec="r", mew=0.8)
+    if r["comb"]:
+        ax.axvline(r["spacing"], c="0.3", ls=":", lw=0.6)
+    verdict = (rf"comb, $\Delta\nu \approx$ {r['spacing']:.2f} {_mu()}Hz" if r["comb"]
+               else "no comb")
+    ax.text(0.98, 0.96, rf"$\nu_\mathrm{{max}}$ = {numax:.1f} {_mu()}Hz" + "\n" + verdict,
             ha="right", va="top", transform=ax.transAxes, fontsize=6,
             bbox=dict(facecolor="white", alpha=0.8, lw=0, pad=1))
-    y = d["r"][show]
-    span = np.nanmax(np.abs(y)) if y.size else 1.0
-    ax.set_ylim(-1.1 * span, 1.35 * span)
+    ax.set(xlim=(lo, hi), ylim=(0, max(1.15 * np.max(z_f[show_f]), 1.3 * r["threshold"])))
 
 
 def _right_axis(ax):
@@ -377,8 +385,8 @@ def plot_spectrum_with_all_numax_estimates(psd, star, numax_estimates, config):
 @_aa_style
 def plot_psps(curves, config, target):
     """Save PSPS: power spectrum of the power spectrum around each method's numax against
-    the period 1/t (as in Viani et al. 2019), with Delta-nu / 2 (dashed) and Delta-nu (dotted)
-    from the strongest peak.
+    2/t, so the strongest peak (period Delta-nu / 2, Viani et al. 2019) sits at Delta-nu
+    (dotted: the Delta-nu estimate).
 
     Args:
         curves: [(label, colour, numax [muHz], psps dict from artefacts.psps)].
@@ -387,21 +395,17 @@ def plot_psps(curves, config, target):
     """
     fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 2.8))
     d_max = max(c[3]["dnu"] for c in curves)
+    lo, hi = 0.4 * d_max, 2.8 * d_max
     for label, colour, numax, r in curves:
         good = r["t_fine"] > 0
-        period = 1.0 / r["t_fine"][good]
-        show = (period >= 0.2 * d_max) & (period <= 1.4 * d_max)
-        ax.plot(period[show], r["z_fine"][good][show], c=colour, lw=0.7,
+        x = 2.0 / r["t_fine"][good]
+        show = (x >= lo) & (x <= hi)
+        ax.plot(x[show], r["z_fine"][good][show], c=colour, lw=0.7,
                 label=rf"{label}: $\nu_\mathrm{{max}}$ = {numax:.1f}, "
                       rf"$\Delta\nu$ = {r['spacing']:.2f} {_mu()}Hz")
-        ax.axvline(r["spacing"] / 2, c=colour, ls="--", lw=0.6)
-        ax.axvline(r["spacing"], c=colour, ls=":", lw=0.6)
-    handles, labels = ax.get_legend_handles_labels()
-    handles += [Line2D([0], [0], color="0.4", ls="--", lw=0.6),
-                Line2D([0], [0], color="0.4", ls=":", lw=0.6)]
-    labels += [r"$\Delta\nu/2$", r"$\Delta\nu$"]
-    ax.legend(handles, labels, loc="upper right")
-    ax.set(xlabel=_freq_label("period"), ylabel="PSPS", xlim=(0.2 * d_max, 1.4 * d_max))
+        ax.axvline(r["spacing"], c=colour, ls=":", lw=0.7)
+    ax.legend(loc="upper right")
+    ax.set(xlabel=_freq_label("$2/t$"), ylabel=r"PS $\otimes$ PS", xlim=(lo, hi))
     ax.set_ylim(bottom=0)
     ax.text(0.02, 0.96, str(target), ha="left", va="top", transform=ax.transAxes, fontsize=7)
     fig.tight_layout()
