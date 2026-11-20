@@ -12,7 +12,7 @@ Two model-independent methods, each run over a grid of binning and smoothing set
 ν<sub>max</sub> from **scaling relations** (stellar parameters from the YAML file and/or
 Gaia DR3) is also available.
 
-> ⚠️ **Known limitations (0.5.0).** Significance is tested per bin (no look-elsewhere
+> ⚠️ **Known limitations (0.6.0).** Significance is tested per bin (no look-elsewhere
 > correction), and the reported uncertainties are formal fit errors, which are too small.
 
 ---
@@ -76,6 +76,33 @@ Show progress with `logging.basicConfig(level=logging.INFO)`.
    (`fap_tables.json`, from `scripts/make_fap_tables.py`); for `delta_nu` they are analytic.
 7. **Fit** – a Gaussian to the smoothed curve. The result is the median over the grid.
 
+### 📉 Background correction (optional)
+
+Both methods respond to the oscillation power relative to the background. Where the
+background falls with frequency (B ∝ ν<sup>−α</sup>), that ratio peaks above ν<sub>max</sub>, by
+α σ²/ν<sub>max</sub> (σ = envelope FWHM / 2.355): typically +5 to +10 % for red giants. With
+`background_correction: true` every fitted ν<sub>max</sub> (and the comb-scan centre) is
+corrected, ν<sub>max</sub> = ν<sub>p</sub> − α σ²/ν<sub>p</sub>, with α measured from the running
+median at ν<sub>p</sub> ± 1.5 FWHM. Where white noise dominates, α ≈ 0 and nothing changes.
+
+### 🔍 Comb scan (optional)
+
+With `comb_scan: true`, each method's final ν<sub>max</sub> is checked and refined:
+
+1. Windows of constant width (`comb_scan_width` × Δν) slide over ν<sub>max</sub> ±
+   `comb_scan_span` envelope FWHM. In each window the autocorrelation is averaged over two lag
+   bands, at D/2 and D (± 0.1 D); the spacing D is found from the data (0.7–1.3 Δν).
+2. A Gaussian is fitted to this profile. Its peak must reach `comb_scan_threshold` (z ≥ 5:
+   about 1 % false alarms on white noise).
+3. If the Gaussian centre is off, the scan is repeated around it (new Δν) until it moves by
+   less than `comb_scan_tolerance` × FWHM. The converged centre becomes the method's
+   ν<sub>max</sub>.
+4. Without a significant envelope the estimate is rejected: the grid fits are repeated with
+   one FWHM around it excluded and the new estimate is scanned (`comb_scan_max_refits`
+   times), then ν<sub>max</sub> = NaN.
+
+Output: `CombScan_ACF.png`, `CombScan_CoV.png` and `<target>_comb_scan.txt`.
+
 ---
 
 ## 🛰️ Kepler short cadence
@@ -110,8 +137,9 @@ lines are the fitted ν<sub>max</sub>. In the PSPS panel the strongest peak sits
 
 ## 🔧 Configuration
 
-Every key is optional; unknown keys raise an error. Relative paths are relative to the YAML
-file. See `examples/KIC1872517.yaml` for a complete file.
+Every key is optional; unknown keys raise an error, while keys of the original package
+(e.g. `use_welch`, `EACF_CONFIG`) are ignored with a warning. Relative paths are relative to
+the YAML file. See `examples/KIC1872517.yaml` for a complete file.
 
 ### STAR
 | key | default | description |
@@ -135,11 +163,16 @@ file. See `examples/KIC1872517.yaml` for a complete file.
 | width_for_wf | null | spectral-window width used for the resolution |
 | do_avg_psd | false | averaged PSD (breaks the FAP tables) |
 | avg_psd_chunk, avg_psd_overlap, avg_psd_method | 90.0, 0.0, median | chunk [d], overlap, median/mean |
+| exclude_regions | [] | `[[lo, hi], ...]` [µHz] replaced by noise at the local level |
 | artefact_cleaning | false | Kepler SC: clean detected artefacts |
 | artefact_fap, artefact_search_halfwidth, artefact_max_halfwidth | 0.01, 1.0, 3.0 | detection level; search / cleaning half-width [µHz] |
-| exclude_regions | [] | `[[lo, hi], ...]` [µHz] replaced by noise at the local level |
 | comb_check | off | Kepler SC: `near_artefacts` or `always` |
 | comb_check_fap, comb_check_tolerance, comb_check_distance | 0.01, 0.3, 0.25 | test level; PSPS search range Δν(1 ± tolerance); distance to an artefact [envelope FWHM] |
+| comb_scan | false | comb scan of each final ν<sub>max</sub>: re-centre on the comb envelope or reject |
+| comb_scan_width, comb_scan_span | 3.0, 2.0 | window width [Δν]; scan range ν<sub>max</sub> ± span × envelope FWHM |
+| comb_scan_threshold, comb_scan_tolerance | 5.0, 0.1 | minimum peak z; convergence [envelope FWHM] |
+| comb_scan_max_iterations, comb_scan_max_refits | 5, 3 | scans per re-centring; refits after rejections |
+| background_correction | false | correct each fitted ν<sub>max</sub> for the background slope |
 | plot_psps | false | PSPS.png, Δν diagnostic (Δν estimates in `dnu_estimates`) |
 | psps_oversampling | 10 | zero padding of the PSPS (plots and Δν only; the test uses independent points) |
 | query_gaia | false | Gaia DR3 parameters for the scaling relations |
@@ -180,8 +213,9 @@ file. See `examples/KIC1872517.yaml` for a complete file.
   ACF_info/all_data.pkl.gz      every grid setting (curves, FAP, fit)
   CoV_info/all_data.pkl.gz
   ACF_info/numax_estimates.txt  numax per setting
-  figures/                      ACF, CoVs, PSPS, lc_and_pg, full_spectrum_with_all_estimates
+  figures/                      ACF, CoVs, PSPS, CombScan_*, lc_and_pg, full_spectrum_with_all_estimates
   <target>_results.txt
+  <target>_comb_scan.txt        comb scan per method (comb_scan: true)
 ```
 
 Read a results file with `pickle.load(gzip.open(path))`.

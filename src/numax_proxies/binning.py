@@ -42,48 +42,58 @@ def replace_below_min_freq(frequency: NDArray, power: NDArray, min_freq: float,
 # --------------------------------------------------------------------------------------
 # 2. Running pseudo-median
 # --------------------------------------------------------------------------------------
+@njit(cache=True)
+def _eval_indices(frequency, factor, step_fraction):
+    """Evaluation points every step_fraction x local window width (at least every point)."""
+    n = len(frequency)
+    df = (frequency[-1] - frequency[0]) / (n - 1)
+    out = np.empty(n, dtype=np.int64)
+    m, i = 0, 0
+    while i < n - 1:
+        out[m] = i
+        m += 1
+        window = factor * ENV_COEFF * max(frequency[i], 0.0) ** ENV_EXP / df   # [points]
+        i += max(1, int(step_fraction * window))
+    out[m] = n - 1
+    return out[:m + 1]
+
+
 @njit(parallel=True, cache=True)
-def _running_median_coarse(frequency, power, factor, stride):
-    """Median in windows of factor x envelope FWHM, every stride points.
+def _running_median_coarse(frequency, power, factor, eval_indices):
+    """Median in windows of factor x envelope FWHM at the given points.
 
     Returns:
-        (indices of the evaluated points, medians at those points).
+        Medians at frequency[eval_indices].
     """
     n = len(power)
     df = (frequency[-1] - frequency[0]) / (n - 1)
-
-    eval_indices = np.arange(0, n, stride)
-    if eval_indices[-1] != n - 1:
-        eval_indices = np.append(eval_indices, n - 1)
-
     m = len(eval_indices)
     med_sub = np.empty(m)
-    env_width = factor * ENV_COEFF * (frequency[eval_indices] ** ENV_EXP)
-    half_w = env_width / 2.0
-
     for j in prange(m):
         i = eval_indices[j]
-        left_val = frequency[i] - half_w[j]
-        right_val = frequency[i] + half_w[j]
-        start_idx = max(0, int(np.floor((left_val - frequency[0]) / df)))
-        end_idx = min(n, int(np.ceil((right_val - frequency[0]) / df)))
-        window_data = power[start_idx:end_idx]
-        if len(window_data) > 0:
-            med_sub[j] = np.median(window_data)
+        half_w = 0.5 * factor * ENV_COEFF * frequency[i] ** ENV_EXP
+        start_idx = max(0, int(np.floor((frequency[i] - half_w - frequency[0]) / df)))
+        end_idx = min(n, int(np.ceil((frequency[i] + half_w - frequency[0]) / df)))
+        if end_idx > start_idx:
+            med_sub[j] = np.median(power[start_idx:end_idx])
         else:
             med_sub[j] = power[i]
-    return eval_indices, med_sub
+    return med_sub
 
 
 def running_median(frequency: NDArray, power: NDArray,
-                   factor: float = DEFAULT_MEDIAN_FILTER_FACTOR, stride: int = 10) -> NDArray:
+                   factor: float = DEFAULT_MEDIAN_FILTER_FACTOR,
+                   step_fraction: float = 0.01) -> NDArray:
     """Running median of the PSD over factor x envelope FWHM(nu).
+
+    The median is evaluated every step_fraction x local window width (at least every point)
+    and interpolated linearly in between; over 1 % of its own window the median barely changes.
 
     Args:
         frequency: uniform frequency grid [muHz].
         power: PSD.
         factor: window width in envelope FWHM.
-        stride: evaluate every stride points and interpolate in between.
+        step_fraction: step between evaluated points, in units of the local window width.
 
     Returns:
         Running median on the full frequency grid.
@@ -92,10 +102,11 @@ def running_median(frequency: NDArray, power: NDArray,
     power = np.ascontiguousarray(power, dtype=np.float64)
     if len(frequency) < 2:
         raise ValueError("At least two frequency points are required.")
-    if stride < 1:
-        raise ValueError("stride must be positive.")
-    eval_indices, med_sub = _running_median_coarse(frequency, power, factor, stride)
-    return np.interp(frequency, frequency[eval_indices], med_sub)
+    if not step_fraction > 0:
+        raise ValueError("step_fraction must be positive.")
+    idx = _eval_indices(frequency, factor, step_fraction)
+    med_sub = _running_median_coarse(frequency, power, factor, idx)
+    return np.interp(frequency, frequency[idx], med_sub)
 
 
 # --------------------------------------------------------------------------------------

@@ -43,7 +43,7 @@ def max_exceedance_threshold(n_points: int, fap: float) -> float:
 # --------------------------------------------------------------------------------------
 def clean_detected_artefacts(frequency, power, rng, fap=0.01, search_halfwidth=1.0,
                              max_halfwidth=3.0, broad_factor=5.0, clip=3.0,
-                             artefacts=KEPLER_SC_ARTEFACTS):
+                             artefacts=KEPLER_SC_ARTEFACTS, med=None):
     """Clean listed artefacts only where a significant narrow peak is present.
 
     For each artefact nu0: the PSD is divided by its running median and expressed in units
@@ -62,6 +62,7 @@ def clean_detected_artefacts(frequency, power, rng, fap=0.01, search_halfwidth=1
         broad_factor: widths multiplied by this for broad artefacts.
         clip: [mean power] the replaced region extends while x > clip.
         artefacts: [(frequency [muHz], "narrow" | "broad")].
+        med: running median of power (default window); None = computed here.
 
     Returns:
         (cleaned power, report: list of dicts with frequency, detected, peak [muHz],
@@ -70,7 +71,7 @@ def clean_detected_artefacts(frequency, power, rng, fap=0.01, search_halfwidth=1
     frequency = np.asarray(frequency, dtype=float)
     power = np.array(power, dtype=float, copy=True)
     df = frequency[1] - frequency[0]
-    med = running_median(frequency, power)
+    med = running_median(frequency, power) if med is None else med
     x = power / med * np.log(2)
     report = []
     for nu0, width_class in artefacts:
@@ -100,7 +101,7 @@ def clean_detected_artefacts(frequency, power, rng, fap=0.01, search_halfwidth=1
     return power, report
 
 
-def replace_regions(frequency, power, regions, rng):
+def replace_regions(frequency, power, regions, rng, med=None):
     """Replace the power in fixed frequency regions with chi^2_2 noise at the local level.
 
     Args:
@@ -108,6 +109,7 @@ def replace_regions(frequency, power, regions, rng):
         power: PSD.
         regions: [[lo, hi], ...] [muHz].
         rng: numpy random generator.
+        med: running median of power (default window); None = computed here.
 
     Returns:
         Copy of power.
@@ -116,7 +118,7 @@ def replace_regions(frequency, power, regions, rng):
     power = np.array(power, dtype=float, copy=True)
     if not regions:
         return power
-    med = running_median(frequency, power)
+    med = running_median(frequency, power) if med is None else med
     for lo, hi in regions:
         m = (frequency >= lo) & (frequency <= hi)
         if m.any():

@@ -32,6 +32,7 @@ PSD:                          # pre-computed spectra (frequency [muHz], power)
   avg_psd_file: null
 
 CONFIG:
+  # light curve processing
   normalize: true             # flux -> ppm
   sort: true                  # sort, drop duplicates, start at t = 0
   close_gaps: false
@@ -40,16 +41,34 @@ CONFIG:
   savgol_window: 90.0         # days
   add_noise: false
   noise_std: 0.0              # ppm
+  # spectra
   oversampling: 1.0
   width_for_wf: null
   do_avg_psd: false
   avg_psd_chunk: 90.0         # days
   avg_psd_overlap: 0.0        # fraction of a chunk shared with the next one
   avg_psd_method: median      # median or mean
+  # spectrum cleaning (before the methods)
+  exclude_regions: []         # [[lo, hi], ...] muHz replaced by noise (Kepler SC: [[359, 372]])
+  artefact_cleaning: false    # Kepler SC: clean listed artefacts where a narrow peak is detected
+  # checks of the fitted numax
+  comb_check: 'off'           # Kepler SC: off | near_artefacts | always (PSPS test of every fit)
+  comb_scan: false            # local 2D ACF around each final numax: re-centre or reject
+  comb_scan_width: 3.0        # window width [Delta-nu]
+  comb_scan_span: 2.0         # scan numax +- span x envelope FWHM
+  comb_scan_threshold: 5.0    # minimum peak z of the envelope (~1 % false alarms)
+  comb_scan_tolerance: 0.1    # converged when the centre moves <= this x FWHM
+  comb_scan_max_iterations: 5
+  comb_scan_max_refits: 3
+  background_correction: false  # numax -= alpha sigma^2 / numax (background slope)
+  # Delta-nu diagnostic
+  plot_psps: false            # PSPS.png around the ACF and CoV numax
+  # misc
   query_gaia: false
   initial_numax: null         # muHz; skips the automatic first guess
   n_threads: null             # Numba threads; null = NUMBA_NUM_THREADS / all cores
   random_seed: 42
+  # output
   plot_lc: true
   save_lc: false
   save_psd: false
@@ -57,10 +76,6 @@ CONFIG:
   save_results: true
   results_directory: results_example   # relative to the working directory
   figure_format: png          # png, pdf or [png, pdf]
-  # Kepler short cadence only (STAR.cadence: Kepler_SC)
-  artefact_cleaning: false    # clean listed artefacts where a narrow peak is detected
-  exclude_regions: []         # [[lo, hi], ...] muHz replaced by noise (Kepler SC: [[359, 372]])
-  comb_check: 'off'           # off | near_artefacts | always: PSPS comb test of fitted numax
 
 ACF_CONFIG:
   min_freq: 1.0               # muHz

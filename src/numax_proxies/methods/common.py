@@ -61,3 +61,23 @@ def save_numax_estimates(results: dict, path: Path) -> None:
     numax, err = fitted_numaxes(results)
     np.savetxt(path, np.column_stack([numax, err]), header="numax,numax_err",
                delimiter=",", fmt="%.4f")
+
+
+def correct_fits(results: dict, frequency, median) -> None:
+    """Background correction of every fitted numax (in place; see background.py).
+
+    Args:
+        results: {setting: result dict with "fit_numax" (ufloat)}.
+        frequency: frequency grid [muHz].
+        median: running median of the PSD on that grid.
+
+    The uncorrected value is kept as "fit_numax_raw"; the formal error is unchanged.
+    """
+    from ..background import correct_numax
+    for d in results.values():
+        x = d.get("fit_numax")
+        if x is None:
+            continue
+        d["fit_numax_raw"] = x
+        if np.isfinite(x.n):
+            d["fit_numax"] = ufloat(correct_numax(frequency, median, x.n), x.s)

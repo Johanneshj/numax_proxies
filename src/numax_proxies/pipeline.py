@@ -6,6 +6,10 @@
     proxy.compute_numax_from_scaling_relations()   # needs Gaia and/or STAR parameters
     proxy.plotting()
     proxy.results                                  # DataFrame: label, numax, numax_err
+    proxy.comb_scan_table                          # with CONFIG.comb_scan: per method
+
+The running median and the relative power of a spectrum are computed once and shared by the
+cleaning, both methods, the comb check and the comb scan.
 """
 import logging
 from pathlib import Path
@@ -14,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from . import lightcurve as lcp
+from .binning import DEFAULT_MEDIAN_FILTER_FACTOR, running_median
 from .config import GlobalConfig, load_config
 from .data import GaiaData, PSDData
 from .io import load_psd, save_lightcurve, save_psd
@@ -45,6 +50,10 @@ class NumaxProxies:
         self.rng = np.random.default_rng(self.config.random_seed)
         self.artefact_report = []
         self.dnu_estimates = {}
+        self.comb_scan_results = {}
+        self._medians = {}                   # (id(power), factor) -> (power, running median)
+        self._relative = {}                  # (id(power), factor) -> (power, P / median - 1)
+        self._checkers = {}                  # (id(power), factor) -> (power, CombChecker)
 
     @classmethod
     def read_yaml(cls, yaml_path: str) -> "NumaxProxies":
@@ -104,21 +113,74 @@ class NumaxProxies:
             self.avg_psd = load_psd(self.psd_input.avg_psd_file)
         else:
             self._spectrum_from_lightcurve()
-        if self.config.artefact_cleaning and self.psd is not None and self._kepler_sc_checks(
-                "artefact_cleaning"):
+        clean = self.config.artefact_cleaning and self.psd is not None and self._kepler_sc_checks(
+            "artefact_cleaning")
+        exclude = self.config.exclude_regions and self.psd is not None
+        if clean or exclude:
+            # one running median for the cleaning and the methods: the cleaned regions are
+            # replaced by noise at this median level, so the median of the cleaned PSD is the same
+            med = self.running_median(self.psd)
+        if clean:
             from .artefacts import clean_detected_artefacts
             cfg = self.config
             power, self.artefact_report = clean_detected_artefacts(
                 self.psd.frequency, self.psd.psd, self.rng, cfg.artefact_fap,
-                cfg.artefact_search_halfwidth, cfg.artefact_max_halfwidth)
+                cfg.artefact_search_halfwidth, cfg.artefact_max_halfwidth, med=med)
             self.psd = PSDData(self.psd.frequency, power)
-        if self.config.exclude_regions and self.psd is not None:
+        if exclude:
             from .artefacts import replace_regions
             self.psd = PSDData(self.psd.frequency, replace_regions(
-                self.psd.frequency, self.psd.psd, self.config.exclude_regions, self.rng))
+                self.psd.frequency, self.psd.psd, self.config.exclude_regions, self.rng, med))
+        if clean or exclude:
+            self._medians[(id(self.psd.psd), float(DEFAULT_MEDIAN_FILTER_FACTOR))] = (self.psd.psd, med)
             logger.info("%s: replaced %s muHz by noise", self.star.target,
                         self.config.exclude_regions)
         return self
+
+    def running_median(self, spectrum: PSDData, factor: float = DEFAULT_MEDIAN_FILTER_FACTOR):
+        """Running median of a spectrum over factor x envelope FWHM, computed once and reused
+        (cleaning, ACF, CoV, comb scan).
+
+        Args:
+            spectrum: PSDData (self.psd or self.avg_psd).
+            factor: window in envelope FWHM.
+
+        Returns:
+            Running median on the spectrum's frequency grid.
+        """
+        key = (id(spectrum.psd), float(factor))
+        if key not in self._medians or self._medians[key][0] is not spectrum.psd:
+            self._medians[key] = (spectrum.psd,
+                                  running_median(spectrum.frequency, spectrum.psd, factor))
+        return self._medians[key][1]
+
+    def relative_power(self, spectrum: PSDData, factor: float = DEFAULT_MEDIAN_FILTER_FACTOR):
+        """P / running median - 1 of a spectrum, computed once and reused (comb check, comb scan).
+
+        Args:
+            spectrum: PSDData.
+            factor: running-median window in envelope FWHM.
+
+        Returns:
+            Relative power on the spectrum's frequency grid.
+        """
+        key = (id(spectrum.psd), float(factor))
+        if key not in self._relative or self._relative[key][0] is not spectrum.psd:
+            self._relative[key] = (spectrum.psd,
+                                   spectrum.psd / self.running_median(spectrum, factor) - 1.0)
+        return self._relative[key][1]
+
+    def _comb_checker(self, spectrum: PSDData, factor: float):
+        """One PSPS comb checker per spectrum and median window, shared by ACF and CoV (its
+        cache of tested numax values is then shared too)."""
+        from .artefacts import CombChecker
+        key = (id(spectrum.psd), float(factor))
+        if key not in self._checkers or self._checkers[key][0] is not spectrum.psd:
+            cfg = self.config
+            self._checkers[key] = (spectrum.psd, CombChecker(
+                spectrum.frequency, self.relative_power(spectrum, factor), cfg.comb_check,
+                cfg.comb_check_tolerance, cfg.comb_check_fap, cfg.comb_check_distance))
+        return self._checkers[key][1]
 
     def _kepler_sc_checks(self, option: str) -> bool:
         """True if the Kepler SC checks apply (STAR.cadence == "Kepler_SC"); warn otherwise."""
@@ -184,11 +246,19 @@ class NumaxProxies:
         Returns:
             The method object.
         """
-        method = cls(self._spectrum_for_methods(), cfg, self.config, self.star.target,
-                     self.config.initial_numax)
+        spec = self._spectrum_for_methods()
+        method = cls(spec, cfg, self.config, self.star.target, self.config.initial_numax)
+        if not cfg.replace_below_min_freq:
+            method.median = self.running_median(spec, cfg.median_filter_factor)
+        if self.config.background_correction:
+            method.background_median = self.running_median(spec)
         if self.config.comb_check != "off" and self._kepler_sc_checks("comb_check"):
             method.comb_check_mode = self.config.comb_check
+            if not cfg.replace_below_min_freq:
+                method.comb_checker = self._comb_checker(spec, cfg.median_filter_factor)
         method.compute()
+        if self.config.comb_scan:
+            self._comb_scan(method, label, cfg.plot)
         if cfg.plot:
             method.plot()
         if cfg.save_info:
@@ -197,6 +267,68 @@ class NumaxProxies:
             method.save_numax_estimates()
         self.numax_estimates[label] = method.numax_estimate
         return method
+
+    def _comb_scan(self, method, label, plot):
+        """Comb scan of the method's final numax (CONFIG.comb_scan).
+
+        The scan is re-centred on its fitted centre until it converges; the converged centre
+        becomes the method's numax. Without a significant envelope the estimate is rejected:
+        the grid fits are repeated with one envelope FWHM around it excluded and the new
+        estimate is scanned (comb_scan_max_refits times); after that the numax is NaN.
+
+        Args:
+            method: computed NumaxFromACF or NumaxFromCoV.
+            label: key in numax_estimates.
+            plot: also save CombScan_<ACF|CoV>.png.
+        """
+        from uncertainties import ufloat
+        from .comb_scan import recentre
+        cfg, name = self.config, "ACF" if label == "numax_2DACF" else "CoV"
+        spec = self._spectrum_for_methods()
+        rel = self.relative_power(spec)
+        original = method.numax_estimate.n
+        rejected, attempts, accepted = [], [], None
+        for _ in range(cfg.comb_scan_max_refits + 1):
+            start = method.numax_estimate.n
+            if not np.isfinite(start):
+                break
+            r = recentre(spec.frequency, rel, start, cfg.comb_scan_width, cfg.comb_scan_span,
+                         cfg.comb_scan_threshold, cfg.comb_scan_tolerance,
+                         cfg.comb_scan_max_iterations, with_map=plot)
+            attempts.append(r)
+            if r["status"] != "rejected":
+                accepted = r
+                break
+            rejected.append(start)
+            logger.info("%s: %s numax %.1f has no significant comb envelope; refitting without it",
+                        self.star.target, name, start)
+            method.refit(rejected)
+        method.numax_override = accepted["numax"] if accepted else ufloat(np.nan, np.nan)
+        if accepted and cfg.background_correction:      # the scan centre is uncorrected
+            from .background import correct_numax
+            raw = accepted["numax"]
+            accepted["numax_raw"] = raw
+            method.numax_override = ufloat(
+                correct_numax(spec.frequency, self.running_median(spec), raw.n), raw.s)
+        method.comb_scan = dict(original=original, rejected=rejected, attempts=attempts,
+                                accepted=accepted, final=method.numax_override)
+        self.comb_scan_results[name] = method.comb_scan
+        if accepted:
+            last = accepted["scans"][-1]
+            logger.info("%s: comb scan %s: %.1f -> %.1f muHz (%s after %d scans, peak z %.1f)",
+                        self.star.target, name, accepted["start"], accepted["numax"].n,
+                        accepted["status"], len(accepted["scans"]), last["peak_z"])
+        else:
+            logger.warning("%s: comb scan rejected every %s numax (%s)", self.star.target, name,
+                           ", ".join(f"{v:.1f}" for v in rejected) or "none")
+        if plot:
+            shown = accepted or next((r for r in attempts if r["scans"]), None)
+            if shown and shown["scans"]:
+                from .plotting import plot_comb_scan
+                note = (f"{shown['status']}, {len(shown['scans'])} scan(s), start "
+                        f"{shown['start']:.1f}" + (f", rejected {len(rejected)}" if rejected else ""))
+                plot_comb_scan(shown["scans"][-1], rel, spec.frequency, name, cfg,
+                               self.star.target, note)
 
     def compute_numax_from_acf(self):
         """Run the ACF method; result in numax_estimates['numax_2DACF'] and self.acf."""
@@ -268,4 +400,33 @@ class NumaxProxies:
         if self.config.save_results:
             self.out_dir.mkdir(parents=True, exist_ok=True)
             df.to_csv(self.out_dir / f"{self.star.target}_results.txt", index=False)
+            if self.comb_scan_results:
+                self.comb_scan_table.to_csv(self.out_dir / f"{self.star.target}_comb_scan.txt",
+                                            index=False)
         return df
+
+    @property
+    def comb_scan_table(self) -> pd.DataFrame:
+        """Comb scan per method (CONFIG.comb_scan).
+
+        Returns:
+            DataFrame: method, numax_original (before the comb scan), rejected (numax values
+            without a significant envelope), start (numax the accepted scan started from),
+            numax (final, background-corrected if CONFIG.background_correction), numax_comb
+            (comb-scan centre), numax_err, status, n_scans, peak_z (last scan), D [muHz].
+        """
+        rows = []
+        for k, c in self.comb_scan_results.items():
+            a = c["accepted"]
+            last = a["scans"][-1] if a else None
+            rows.append({"method": k, "numax_original": c["original"],
+                         "rejected": ";".join(f"{v:.2f}" for v in c["rejected"]),
+                         "start": a["start"] if a else np.nan,
+                         "numax": c["final"].n,
+                         "numax_comb": a["numax"].n if a else np.nan,
+                         "numax_err": a["numax"].s if a else np.nan,
+                         "status": a["status"] if a else "rejected",
+                         "n_scans": len(a["scans"]) if a else 0,
+                         "peak_z": last["peak_z"] if a else np.nan,
+                         "D": last["D"] if a else np.nan})
+        return pd.DataFrame(rows)

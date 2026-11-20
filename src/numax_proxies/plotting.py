@@ -3,8 +3,6 @@
 import functools
 from pathlib import Path
 
-import matplotlib
-
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
@@ -224,6 +222,15 @@ def _draw_spectrum(ax, method):
     _set_xlim(ax, method.cfg, np.max(method.frequency))
 
 
+def _draw_final(ax, method, handles):
+    """Solid line at the method's final numax (after comb scan / background correction)."""
+    final = method.numax_estimate.n
+    if np.isfinite(final):
+        ax.axvline(final, c="m", lw=1.2, zorder=2)
+        handles.append(Line2D([0], [0], color="m", lw=1.2,
+                              label=rf"final $\nu_\mathrm{{max}}$ = {final:.1f}"))
+
+
 def _draw_cacf(ax, method):
     """CACF curves, thresholds and fits of every grid setting."""
     cfg, results = method.cfg, method.results
@@ -242,7 +249,8 @@ def _draw_cacf(ax, method):
                Line2D([0], [0], color="k", label="smoothed CACF"),
                Line2D([0], [0], color="r", label="Gaussian fit"),
                Line2D([0], [0], color="green", label="FAP"),
-               Line2D([0], [0], color="b", ls="--", label=r"$\nu_\mathrm{max}$")]
+               Line2D([0], [0], color="b", ls="--", label=r"$\nu_\mathrm{max}$ per setting")]
+    _draw_final(ax, method, handles)
     if method.initial_numax:
         ax.axvline(method.initial_numax, c="green", ls="-.")
         handles.append(Line2D([0], [0], color="green", ls="-.", label="initial guess"))
@@ -326,8 +334,9 @@ def plot_cov(method):
                Line2D([0], [0], color="k", label="smoothed CoV"),
                Line2D([0], [0], color="green", label="FAP"),
                Line2D([0], [0], color="r", label="Gaussian fit"),
-               Line2D([0], [0], color="b", ls="--", label=r"$\nu_\mathrm{max}$"),
+               Line2D([0], [0], color="b", ls="--", label=r"$\nu_\mathrm{max}$ per setting"),
                Line2D([0], [0], color="orange", label="upper limit")]
+    _draw_final(ax, method, handles)
     if method.initial_numax:
         ax.axvline(method.initial_numax, c="green", ls="-.")
         handles.append(Line2D([0], [0], color="green", ls="-.", label="initial guess"))
@@ -410,3 +419,60 @@ def plot_psps(curves, config, target):
     ax.text(0.02, 0.96, str(target), ha="left", va="top", transform=ax.transAxes, fontsize=7)
     fig.tight_layout()
     _save(fig, config, target, "PSPS")
+
+
+# --------------------------------------------------------------------------------------
+@_aa_style
+def plot_comb_scan(r, rel_power, frequency, name, config, target, note=""):
+    """Save CombScan_<name>: one comb scan (see comb_scan.py), dashed blue = the numax it
+    was centred on, dotted red = fitted centre.
+
+    Panels: relative power around numax; local 2D ACF (r / sd(r), lag in Delta-nu of the
+    tested numax) with the two lag bands; collapsed profile z with the Gaussian fit.
+
+    Args:
+        r: dict from comb_scan.comb_scan.
+        rel_power: relative power used for the scan.
+        frequency: frequency grid [muHz].
+        name: "ACF" or "CoV".
+        config: ProcessingConfig.
+        target: star name.
+        note: extra text for the label (e.g. the re-centring status).
+    """
+    numax, centres = r["numax"], r["centres"]
+    pct = r"\%" if plt.rcParams["text.usetex"] else "%"
+    fig, axs = plt.subplots(3, 1, figsize=(COLUMN_WIDTH, 5.6), sharex=True,
+                            gridspec_kw=dict(height_ratios=[0.8, 1.1, 1]))
+    m = (frequency >= centres[0]) & (frequency <= centres[-1])
+    w = max(1, int(round(0.05 * r["dnu"] / (frequency[1] - frequency[0]))))
+    ax = axs[0]
+    ax.plot(frequency[m], rel_power[m] + 1, c="0.75", lw=0.3, rasterized=True)
+    ax.plot(frequency[m], np.convolve(rel_power[m] + 1, np.ones(w) / w, "same"), c="k", lw=0.6,
+            rasterized=True)
+    ax.set(ylabel="P / median", ylim=(0, np.percentile(rel_power[m] + 1, 99.9) * 1.1))
+    ax.text(0.02, 0.95, f"{target}, {name}" + (f"\n{note}" if note else ""), transform=ax.transAxes, va="top", fontsize=7,
+            bbox=dict(facecolor="white", alpha=0.8, lw=0))
+
+    ax = axs[1]
+    ax.imshow(np.clip(r["map"], -4, 4), aspect="auto", origin="lower", cmap="RdBu_r", vmin=-4,
+              vmax=4, extent=[centres[0], centres[-1], 0, r["width"]], rasterized=True)
+    d = r["D"] / r["dnu"]
+    for mult in (0.5, 1.0):
+        for y in ((mult - 0.1) * d, (mult + 0.1) * d):
+            ax.axhline(y, c="k", lw=0.5, ls="--")
+    ax.set(ylabel=r"lag [$\Delta\nu$]")
+
+    ax = axs[2]
+    ax.axhline(0, c="0.5", lw=0.5)
+    ax.plot(centres, r["z"], c="k", lw=0.8)
+    if r["popt"] is not None:
+        xs = np.linspace(centres[0], centres[-1], 400)
+        ax.plot(xs, gaussian(xs, *r["popt"]), c="tab:red", lw=0.9)
+        ax.axvline(r["numax_comb"].n, c="tab:red", lw=0.7, ls=":")
+        ax.set_title(rf"peak $z$ = {r['peak_z']:.1f}, centre = {r['numax_comb'].n:.1f} "
+                     rf"{_mu()}Hz ({100 * r['offset']:+.1f} {pct})", fontsize=7)
+    ax.set(xlabel=_freq_label("window centre"), ylabel="$z$")
+    for ax in axs:
+        ax.axvline(numax, c="tab:blue", lw=0.7, ls="--")
+    fig.tight_layout(h_pad=0.4)
+    _save(fig, config, target, f"CombScan_{name}")

@@ -90,18 +90,33 @@ class ProcessingConfig:
     avg_psd_chunk: float = 90.0             # days
     avg_psd_overlap: float = 0.0            # fraction of a chunk shared by neighbours
     avg_psd_method: Literal["median", "mean"] = "median"
+
+    # spectrum cleaning (before the methods)
     exclude_regions: list = field(default_factory=list)   # [[lo, hi], ...] muHz replaced by noise
-    # Kepler SC checks, used only if STAR.cadence == "Kepler_SC":
-    artefact_cleaning: bool = False         # clean listed artefacts only where a peak is detected
+    artefact_cleaning: bool = False         # Kepler SC: clean listed artefacts where a peak is detected
     artefact_fap: float = 0.01              # false-alarm probability of a detection, per artefact
     artefact_search_halfwidth: float = 1.0  # muHz around each listed frequency (broad: x5)
     artefact_max_halfwidth: float = 3.0     # muHz, largest half-width replaced (broad: x5)
-    comb_check: Literal["off", "near_artefacts", "always"] = "off"   # PSPS comb test after fits
+
+    # checks of the fitted numax
+    comb_check: Literal["off", "near_artefacts", "always"] = "off"   # Kepler SC: PSPS comb test
+                                            # of every grid fit (refit without a failed region)
     comb_check_fap: float = 0.01            # false-alarm probability of the comb test
     comb_check_tolerance: float = 0.3       # search 1/Delta-nu and 2/Delta-nu within +- 30 %
     comb_check_distance: float = 0.25       # near_artefacts: within this x envelope FWHM
-    plot_psps: bool = False                 # PSPS.png: PSPS around the ACF and CoV numax (Delta-nu)
-    psps_oversampling: int = 10             # zero padding of the PSPS (plot and Delta-nu estimate)
+    comb_scan: bool = False                 # any cadence: local 2D ACF around each final numax;
+                                            # re-centre on the comb envelope (new numax) or reject
+    comb_scan_width: float = 3.0            # window width [Delta-nu]
+    comb_scan_span: float = 2.0             # scan numax +- span x envelope FWHM
+    comb_scan_threshold: float = 5.0        # min. peak z of the envelope (white noise: ~1 %)
+    comb_scan_tolerance: float = 0.1        # converged when the centre moves <= this x FWHM
+    comb_scan_max_iterations: int = 5       # scans per re-centring
+    comb_scan_max_refits: int = 3           # refits after rejections, then numax = NaN
+    background_correction: bool = False     # numax -= alpha sigma^2 / numax (background slope)
+
+    # Delta-nu diagnostic
+    plot_psps: bool = False                 # PSPS.png: PSPS around the ACF and CoV numax
+    psps_oversampling: int = 10             # zero padding of the PSPS (plots and Delta-nu only)
 
     # misc
     query_gaia: bool = False
@@ -119,7 +134,7 @@ class ProcessingConfig:
     figure_format: Union[str, list] = "png"  # png, pdf, or [png, pdf] (figures 8.8 cm wide)
 
     def __post_init__(self):
-        """Check avg_psd_method, avg_psd_overlap and figure_format."""
+        """Check the values (ranges, choices, integer counts) and normalise lists."""
         if self.avg_psd_method not in ("median", "mean"):
             raise ValueError("CONFIG.avg_psd_method must be 'median' or 'mean'")
         if not 0 <= self.avg_psd_overlap < 1:
@@ -132,6 +147,14 @@ class ProcessingConfig:
         if int(self.psps_oversampling) != self.psps_oversampling or self.psps_oversampling < 1:
             raise ValueError("CONFIG.psps_oversampling must be a positive integer")
         self.psps_oversampling = int(self.psps_oversampling)
+        for name in ("comb_scan_width", "comb_scan_span", "comb_scan_tolerance",
+                     "comb_scan_max_iterations"):
+            if not getattr(self, name) > 0:
+                raise ValueError(f"CONFIG.{name} must be positive")
+        if int(self.comb_scan_max_refits) != self.comb_scan_max_refits or self.comb_scan_max_refits < 0:
+            raise ValueError("CONFIG.comb_scan_max_refits must be a non-negative integer")
+        self.comb_scan_max_refits = int(self.comb_scan_max_refits)
+        self.comb_scan_max_iterations = int(self.comb_scan_max_iterations)
         if not 0 < self.comb_check_tolerance < 1:
             raise ValueError("CONFIG.comb_check_tolerance must be in (0, 1)")
         regions = self.exclude_regions or []
@@ -250,11 +273,12 @@ SECTIONS = {
     "COV_CONFIG": ("cov_config", COVConfig),
 }
 
-# Keys accepted for backwards compatibility; they have no effect.
+# Keys of the original package (e.g. the per-star YAMLs of the earlier runs); accepted with a
+# warning, they have no effect.
 DEPRECATED_KEYS = {
     "CONFIG": {"plot_all_estimates"},
     "ACF_CONFIG": {"sliding_window_style"},
-    "COV_CONFIG": {"use_linear_bins"},
+    "COV_CONFIG": {"use_linear_bins", "use_welch", "welch_seg_size", "use_Bell"},
 }
 DEPRECATED_SECTIONS = {"EACF_CONFIG"}
 

@@ -22,11 +22,11 @@ from uncertainties import ufloat
 
 from ..binning import (as_float_list, log_numax_bins, replace_below_min_freq, running_median,
                        smooth_over_envelope)
-from ..fitting import gaussian_offset_one
+from ..fitting import gaussian_offset_one, gaussian_offset_one_jac
 from ..seismic import cov_upper_limit, envelope_fwhm
 from ..significance import add_faps, significant_near
 from ..threads import numba_threads
-from .common import median_estimate, save_numax_estimates, save_pickle
+from .common import correct_fits, median_estimate, save_numax_estimates, save_pickle
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ def cov_in_windows(power, idx_start, idx_end, s, sq, bad):
     return out
 
 
-def normalized_power(frequency, power, cfg, seed):
+def normalized_power(frequency, power, cfg, seed, med=None):
     """Normalised power P / median.
 
     Args:
@@ -125,6 +125,8 @@ def normalized_power(frequency, power, cfg, seed):
         power: PSD.
         cfg: COVConfig (min_freq, replace_below_min_freq, median_filter_factor).
         seed: random seed for the white-noise replacement.
+        med: running median of power with cfg.median_filter_factor (not used
+            with replace_below_min_freq); None = computed here.
 
     Returns:
         (normalised power, running median).
@@ -133,7 +135,8 @@ def normalized_power(frequency, power, cfg, seed):
     power = np.ascontiguousarray(power, dtype=np.float64)
     if cfg.replace_below_min_freq:
         power = replace_below_min_freq(frequency, power, cfg.min_freq, seed)
-    med = running_median(frequency, power, cfg.median_filter_factor)
+    if med is None or cfg.replace_below_min_freq:
+        med = running_median(frequency, power, cfg.median_filter_factor)
     return power / med, med
 
 
@@ -229,7 +232,8 @@ def fit_gaussian(x, y, numax_init):
         bounds = ([-np.inf, 1e-6, lo], [np.inf, np.inf, hi])
         with warnings.catch_warnings():
             warnings.simplefilter("error", OptimizeWarning)
-            popt, pcov = curve_fit(gaussian_offset_one, x, y, p0=p0, bounds=bounds)
+            popt, pcov = curve_fit(gaussian_offset_one, x, y, p0=p0, bounds=bounds,
+                                   jac=gaussian_offset_one_jac)
         sigma, centre = abs(popt[1]), popt[2]
         centre_unc = np.sqrt(np.diag(pcov))[2]          # formal error
         if not np.all(np.isfinite(popt)) or sigma <= 0:
@@ -315,7 +319,7 @@ def _fit_one(data, initial_numax, use_fallback, at_numax):
 
 
 def fit_all(results, initial_numax=None, use_fallback=True, at_numax=False,
-            comb_checker=None) -> dict:
+            comb_checker=None, exclude=()) -> dict:
     """Fit every grid setting (in place).
 
     Args:
@@ -325,6 +329,8 @@ def fit_all(results, initial_numax=None, use_fallback=True, at_numax=False,
         at_numax: require a significant bin within one envelope FWHM of the result.
         comb_checker: callable numax -> bool (artefacts.CombChecker) or None. A fit that fails
             it is repeated with one envelope FWHM around it excluded (MAX_COMB_RETRIES times).
+        exclude: numax values [muHz]; bins within one envelope FWHM of each are left out of
+            every fit (comb scan rejections; the starting guess is then not used).
 
     Returns:
         results, with fit_numax (ufloat), fit_params and fit_type ("gaussian", "fallback",
@@ -334,17 +340,23 @@ def fit_all(results, initial_numax=None, use_fallback=True, at_numax=False,
                             "none"), 0)
     for data in results.values():
         bcs = np.asarray(data["bin_centers"], dtype=float)
+        def masked(centres):
+            if not len(centres):
+                return data
+            return dict(data, cov=_mask_near(bcs, data["cov"], centres),
+                        cov_smoothed=_mask_near(bcs, data["cov_smoothed"], centres))
+
         excluded = []
-        numax, params, fit_type = _fit_one(data, initial_numax, use_fallback, at_numax)
+        numax, params, fit_type = _fit_one(masked(exclude), None if len(exclude) else initial_numax,
+                                           use_fallback, at_numax)
         while comb_checker is not None and fit_type in ("gaussian", "fallback") \
                 and not comb_checker(numax.n):
             excluded.append(numax.n)
             if initial_numax is not None or len(excluded) > MAX_COMB_RETRIES:
                 numax, params, fit_type = ufloat(np.nan, np.nan), {}, "no_comb"
                 break
-            trial = dict(data, cov=_mask_near(bcs, data["cov"], excluded),
-                         cov_smoothed=_mask_near(bcs, data["cov_smoothed"], excluded))
-            numax, params, fit_type = _fit_one(trial, None, use_fallback, at_numax)
+            numax, params, fit_type = _fit_one(masked([*exclude, *excluded]), None,
+                                               use_fallback, at_numax)
         if excluded and fit_type in ("none", "not_significant", "rejected"):
             fit_type = "no_comb"                         # nothing left after the rejections
         nan_params = {"amp": np.nan, "sigma": np.nan, "numax": np.nan, "numax_err": np.nan}
@@ -381,6 +393,9 @@ class NumaxFromCoV:
         self.id = target or "unknown"
         self.initial_numax = initial_numax
         self.comb_check_mode = None          # "near_artefacts" | "always" (set by the pipeline)
+        self.comb_checker = None             # shared artefacts.CombChecker (set by the pipeline)
+        self.median = None                   # running median of psd (set by the pipeline)
+        self.background_median = None        # set -> background-corrected numax per fit
 
     def compute(self):
         """Normalised power, CoV, thresholds and fits for every grid setting.
@@ -391,24 +406,49 @@ class NumaxFromCoV:
         t0 = time.perf_counter()
         with numba_threads(self.config.n_threads):
             self.normalized_power, self.med_filter = normalized_power(
-                self.frequency, self.power, self.cfg, self.config.random_seed)
+                self.frequency, self.power, self.cfg, self.config.random_seed,
+                self.median)
             results = calculate_covs(self.frequency, self.normalized_power, self.cfg)
         results = add_faps(results, "CoV", self.cfg)
-        checker = None
-        if self.comb_check_mode:
+        checker = self.comb_checker if self.comb_check_mode else None
+        if self.comb_check_mode and checker is None:
             from ..artefacts import CombChecker
             checker = CombChecker(self.frequency, self.normalized_power - 1.0,
                                   self.comb_check_mode, self.config.comb_check_tolerance,
                                   self.config.comb_check_fap,
                                   self.config.comb_check_distance)
+        self._checker = checker
         self.results = fit_all(results, self.initial_numax, self.cfg.use_fallback,
                                self.cfg.significance_at_numax, checker)
+        self._correct_background()
         logger.info("%s: CoV done in %.1f s", self.id, time.perf_counter() - t0)
         return self
 
+    def refit(self, exclude):
+        """Repeat the fits with bins within one envelope FWHM of each value in exclude left out.
+
+        Args:
+            exclude: numax values [muHz].
+
+        Returns:
+            self.
+        """
+        self.results = fit_all(self.results, self.initial_numax, self.cfg.use_fallback,
+                               self.cfg.significance_at_numax, self._checker, list(exclude))
+        self._correct_background()
+        return self
+
+    def _correct_background(self):
+        """Background-correct every fitted numax if background_median is set."""
+        if self.background_median is not None:
+            correct_fits(self.results, self.frequency, self.background_median)
+
     @property
     def numax_estimate(self):
-        """Median numax and median formal error over the grid (ufloat)."""
+        """Median numax and median formal error over the grid (ufloat), or the comb-scan
+        numax if the comb scan set one (numax_override)."""
+        if getattr(self, "numax_override", None) is not None:
+            return self.numax_override
         return median_estimate(self.results)
 
     def _dir(self) -> Path:

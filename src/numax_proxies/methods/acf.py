@@ -14,9 +14,7 @@ Steps, for every (overlap_scale, width_factor) on the grid:
   5. significance: raw CACF compared with a per-bin FAP threshold
   6. Gaussian fit to the smoothed CACF -> numax
 """
-import gzip
 import logging
-import pickle
 import time
 from pathlib import Path
 
@@ -30,11 +28,11 @@ from uncertainties import ufloat
 
 from ..binning import (as_float_list, log_numax_bins, replace_below_min_freq, running_median,
                        smooth_over_envelope)
-from ..fitting import FWHM_TO_SIGMA, gaussian
+from ..fitting import FWHM_TO_SIGMA, gaussian, gaussian_jac
 from ..seismic import delta_nu, envelope_fwhm
 from ..significance import acf_noise_mean, add_faps, significant_near
 from ..threads import numba_threads
-from .common import median_estimate, save_numax_estimates, save_pickle
+from .common import correct_fits, median_estimate, save_numax_estimates, save_pickle
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +208,7 @@ def acf_map(frequency, rel_power, centres, idx_start, idx_end, n_lag: int = 300,
     return grid, out
 
 
-def relative_power(frequency, power, cfg, seed):
+def relative_power(frequency, power, cfg, seed, med=None):
     """Relative power (P - median) / median.
 
     Args:
@@ -218,13 +216,16 @@ def relative_power(frequency, power, cfg, seed):
         power: PSD.
         cfg: ACFConfig (min_freq, replace_below_min_freq, median_filter_factor).
         seed: random seed for the white-noise replacement.
+        med: running median of power with cfg.median_filter_factor (not used
+            with replace_below_min_freq); None = computed here.
 
     Returns:
         (relative power, running median).
     """
     if cfg.replace_below_min_freq:
         power = replace_below_min_freq(frequency, power, cfg.min_freq, seed)
-    med = running_median(frequency, power, cfg.median_filter_factor)
+    if med is None or cfg.replace_below_min_freq:
+        med = running_median(frequency, power, cfg.median_filter_factor)
     return (power - med) / med, med
 
 
@@ -322,7 +323,8 @@ def fit_cacf(raw, smoothed, centres, fap, initial_numax, max_iterations, n_sigma
             p0 = [amp0, fwhm0 / FWHM_TO_SIGMA, numax0, np.median(y_res)]   # sigma, not FWHM
             lower = [0, 1e-6, min_freq, y_res.min()]
             upper = [1.5 * amp0, 2 * fwhm0, x_res.max(), y_res.max()]
-            popt, pcov = curve_fit(gaussian, x_res, y_res, p0=p0, bounds=(lower, upper))
+            popt, pcov = curve_fit(gaussian, x_res, y_res, p0=p0, bounds=(lower, upper),
+                                   jac=gaussian_jac)
 
             window = np.abs(x_res - popt[2]) <= n_sigma * popt[1]
             integral = (trapezoid(y_res[window], x_res[window]) if window.any()
@@ -345,7 +347,7 @@ def fit_cacf(raw, smoothed, centres, fap, initial_numax, max_iterations, n_sigma
 MAX_COMB_RETRIES = 3          # refits after a fit fails the comb check
 
 
-def fit_all(results, initial_numax, cfg, comb_checker=None) -> dict:
+def fit_all(results, initial_numax, cfg, comb_checker=None, exclude=()) -> dict:
     """Fit every grid setting (in place).
 
     Args:
@@ -354,6 +356,8 @@ def fit_all(results, initial_numax, cfg, comb_checker=None) -> dict:
         cfg: ACFConfig.
         comb_checker: callable numax -> bool (artefacts.CombChecker) or None. A fit that fails
             it is repeated with one envelope FWHM around it excluded (MAX_COMB_RETRIES times).
+        exclude: numax values [muHz]; bins within one envelope FWHM of each are left out of
+            every fit (comb scan rejections; the starting guess is then not used).
 
     Returns:
         results, with fit_numax (ufloat), fit_params and comb_rejected per setting.
@@ -367,17 +371,20 @@ def fit_all(results, initial_numax, cfg, comb_checker=None) -> dict:
         bcs = np.asarray(data["bin_centers"], dtype=float)
         raw = np.asarray(data["cacf_raw"], dtype=float)
         smoothed = np.asarray(data["cacf_smoothed"], dtype=float)
+        def masked(centres):
+            mask = np.zeros(bcs.size, dtype=bool)
+            for c in centres:
+                mask |= np.abs(bcs - c) <= envelope_fwhm(c)
+            return np.where(mask, np.nan, raw), np.where(mask, np.nan, smoothed)
+
         excluded = []
-        numax, popt = fit(raw, smoothed, initial_numax)
+        numax, popt = fit(*masked(exclude), None if len(exclude) else initial_numax)
         while comb_checker is not None and np.isfinite(numax.n) and not comb_checker(numax.n):
             excluded.append(numax.n)
             if initial_numax is not None or len(excluded) > MAX_COMB_RETRIES:
                 numax, popt = ufloat(np.nan, np.nan), np.full(4, np.nan)
                 break
-            mask = np.zeros(bcs.size, dtype=bool)
-            for c in excluded:
-                mask |= np.abs(bcs - c) <= envelope_fwhm(c)
-            numax, popt = fit(np.where(mask, np.nan, raw), np.where(mask, np.nan, smoothed), None)
+            numax, popt = fit(*masked([*exclude, *excluded]), None)
         data["fit_numax"] = numax
         data["fit_params"] = {"amp": popt[0], "sigma": popt[1], "numax": popt[2],
                               "y": popt[3], "numax_err": numax.s}
@@ -409,6 +416,9 @@ class NumaxFromACF:
         self.id = target or "unknown"
         self.initial_numax = initial_numax
         self.comb_check_mode = None          # "near_artefacts" | "always" (set by the pipeline)
+        self.comb_checker = None             # shared artefacts.CombChecker (set by the pipeline)
+        self.median = None                   # running median of psd (set by the pipeline)
+        self.background_median = None        # set -> background-corrected numax per fit
 
     def compute(self):
         """Relative power, CACF, thresholds and fits for every grid setting.
@@ -419,23 +429,48 @@ class NumaxFromACF:
         t0 = time.perf_counter()
         with numba_threads(self.config.n_threads):
             self.normalized_power, self.med_filter = relative_power(
-                self.frequency, self.power, self.cfg, self.config.random_seed)
+                self.frequency, self.power, self.cfg, self.config.random_seed,
+                self.median)
             results = calculate_cacf(self.frequency, self.normalized_power, self.cfg)
         results = add_faps(results, "ACF", self.cfg)
-        checker = None
-        if self.comb_check_mode:
+        checker = self.comb_checker if self.comb_check_mode else None
+        if self.comb_check_mode and checker is None:
             from ..artefacts import CombChecker
             checker = CombChecker(self.frequency, self.normalized_power,
                                   self.comb_check_mode, self.config.comb_check_tolerance,
                                   self.config.comb_check_fap,
                                   self.config.comb_check_distance)
+        self._checker = checker
         self.results = fit_all(results, self.initial_numax, self.cfg, checker)
+        self._correct_background()
         logger.info("%s: ACF done in %.1f s", self.id, time.perf_counter() - t0)
         return self
 
+    def refit(self, exclude):
+        """Repeat the fits with bins within one envelope FWHM of each value in exclude left out.
+
+        Args:
+            exclude: numax values [muHz].
+
+        Returns:
+            self.
+        """
+        self.results = fit_all(self.results, self.initial_numax, self.cfg, self._checker,
+                               list(exclude))
+        self._correct_background()
+        return self
+
+    def _correct_background(self):
+        """Background-correct every fitted numax if background_median is set."""
+        if self.background_median is not None:
+            correct_fits(self.results, self.frequency, self.background_median)
+
     @property
     def numax_estimate(self):
-        """Median numax and median formal error over the grid (ufloat)."""
+        """Median numax and median formal error over the grid (ufloat), or the comb-scan
+        numax if the comb scan set one (numax_override)."""
+        if getattr(self, "numax_override", None) is not None:
+            return self.numax_override
         return median_estimate(self.results)
 
     def _dir(self) -> Path:
