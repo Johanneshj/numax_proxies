@@ -12,7 +12,7 @@ Two model-independent methods, each run over a grid of binning and smoothing set
 ν<sub>max</sub> from **scaling relations** (stellar parameters from the YAML file and/or
 Gaia DR3) is also available.
 
-> ⚠️ **Known limitations (0.6.0).** Significance is tested per bin (no look-elsewhere
+> ⚠️ **Known limitations (0.7.0).** Significance is tested per bin (no look-elsewhere
 > correction), and the reported uncertainties are formal fit errors, which are too small.
 
 ---
@@ -87,21 +87,46 @@ median at ν<sub>p</sub> ± 1.5 FWHM. Where white noise dominates, α ≈ 0 and 
 
 ### 🔍 Comb scan (optional)
 
-With `comb_scan: true`, each method's final ν<sub>max</sub> is checked and refined:
+With `comb_scan: true`, each method's final ν<sub>max</sub> is checked for a regular comb:
 
-1. Windows of constant width (`comb_scan_width` × Δν) slide over ν<sub>max</sub> ±
-   `comb_scan_span` envelope FWHM. In each window the autocorrelation is averaged over two lag
-   bands, at D/2 and D (± 0.1 D); the spacing D is found from the data (0.7–1.3 Δν).
-2. A Gaussian is fitted to this profile. Its peak must reach `comb_scan_threshold` (z ≥ 5:
-   about 1 % false alarms on white noise).
-3. If the Gaussian centre is off, the scan is repeated around it (new Δν) until it moves by
-   less than `comb_scan_tolerance` × FWHM. The converged centre becomes the method's
-   ν<sub>max</sub>.
-4. Without a significant envelope the estimate is rejected: the grid fits are repeated with
-   one FWHM around it excluded and the new estimate is scanned (`comb_scan_max_refits`
-   times), then ν<sub>max</sub> = NaN.
+1. The scan is centred on the **shifted ν<sub>max</sub>**: the peak of P / median smoothed over
+   one envelope FWHM within the guess ± `comb_scan_span` FWHM. Windows of constant width
+   (`comb_scan_width` × Δν) slide over ± `comb_scan_span` FWHM around it.
+2. In each window the autocorrelation is averaged over lag bands m D ± 0.1 D: **integer**
+   (m = 1, 2: modes repeating every Δν), **half** (m = ½, 3⁄2), **combined** (all four),
+   **anti** (the dips, m = ¼ … 9⁄4, sign flipped) and **total** (peaks plus flipped dips).
+   D is the spacing in 0.7–1.3 Δν with the strongest band at lag D.
+3. A Gaussian is fitted to each profile. The integer profile decides: its peak must reach
+   `comb_scan_threshold` (z ≥ 5: < 1 % false alarms on white noise, also with tall spikes).
+   The converged centre (re-scanned until it moves by less than `comb_scan_tolerance` × FWHM)
+   becomes the method's ν<sub>max</sub>.
+4. Without a significant comb the estimate is rejected: the grid fits are repeated with one
+   FWHM around it excluded (`comb_scan_max_refits` times), then ν<sub>max</sub> = NaN.
 
 Output: `CombScan_ACF.png`, `CombScan_CoV.png` and `<target>_comb_scan.txt`.
+
+### 📊 CoV scan (optional)
+
+`cov_scan: true` adds a power-excess check next to the comb scan. It sees envelopes whose comb
+is hard to detect (very sharp, mixed or missing modes), but it also responds to tall artefact
+spikes, so the two are read together.
+
+1. Centred on the shifted ν<sub>max</sub> as above; windows of constant width
+   (`cov_scan_width` × Δν).
+2. Per window the CoV (std / mean) of all points of P / median; white noise gives
+   z = (CoV − 1 + 1/n) √n ≈ N(0, 1).
+3. A Gaussian is fitted to the profile; significant if its peak z ≥ `cov_scan_threshold`
+   (3.6: 1 % false alarms per scan on white noise). If not, the grid fits are repeated without
+   it (`cov_scan_max_refits` times, on a copy: the methods keep their own fits).
+
+The CoV-scan centres are reported as their own estimates (`numax_CoVscan_ACF`,
+`numax_CoVscan_CoV`). Output: `CovScan_ACF.png`, `CovScan_CoV.png`, `<target>_cov_scan.txt`.
+
+### 🎯 One estimate
+
+`results` (and `<target>_results.txt`) also hold **`numax_combined`**: the mean of the available
+seismic estimates (ACF, CoV and the CoV-scan centres; rejected ones left out), with their spread
+(standard deviation) as the uncertainty.
 
 ---
 
@@ -123,22 +148,24 @@ optional checks:
 
 ## 🖼️ Example figures
 
-A red giant (Kepler LC) and a main-sequence star (Kepler SC), with `comb_scan` and
+A red giant (Kepler LC) and a main-sequence star (Kepler SC), with `comb_scan`, `cov_scan` and
 `background_correction` on.
 
 * **ACF**: spectrum, 2D ACF, collapsed ACF and the PSPS comb check.
 * **CoV**: CoV curves and the PSPS comb check.
-* **Comb scan** (of the ACF ν<sub>max</sub>): relative power, local 2D ACF with the two lag
-  bands, and the collapsed profile with its Gaussian fit.
+* **Comb scan** (of the ACF ν<sub>max</sub>): spectrum segment, local 2D ACF with the lag bands
+  (red: correlation, blue: anticorrelation), and the collapsed profiles with the Gaussian fit.
+* **CoV scan** (of the ACF ν<sub>max</sub>): spectrum segment and the CoV per window with the
+  noise level, the threshold and the Gaussian fit.
 
 Each grey/black line is one grid setting; dashed blue lines are the fitted ν<sub>max</sub> per
 setting, the solid magenta line is the final ν<sub>max</sub> (comb scan, background-corrected).
 In the PSPS panel the strongest peak sits at Δν.
 
-| | ACF | CoV | Comb scan |
-|---|---|---|---|
-| **Red giant**, KIC 11612603 (ν<sub>max</sub> = 86.0 µHz) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) | ![RG comb scan](docs/figures/RG_CombScan.png) |
-| **Main sequence**, KIC 6671492 (ν<sub>max</sub> = 728 µHz) | ![MS ACF](docs/figures/MS_ACF.png) | ![MS CoV](docs/figures/MS_CoV.png) | ![MS comb scan](docs/figures/MS_CombScan.png) |
+| | ACF | CoV | Comb scan | CoV scan |
+|---|---|---|---|---|
+| **Red giant**, KIC 11612603 (ν<sub>max</sub> = 86.0 µHz) | ![RG ACF](docs/figures/RG_ACF.png) | ![RG CoV](docs/figures/RG_CoV.png) | ![RG comb scan](docs/figures/RG_CombScan.png) | ![RG CoV scan](docs/figures/RG_CovScan.png) |
+| **Main sequence**, KIC 6671492 (ν<sub>max</sub> = 728 µHz) | ![MS ACF](docs/figures/MS_ACF.png) | ![MS CoV](docs/figures/MS_CoV.png) | ![MS comb scan](docs/figures/MS_CombScan.png) | ![MS CoV scan](docs/figures/MS_CovScan.png) |
 
 ---
 
@@ -176,9 +203,12 @@ the YAML file. See `examples/KIC1872517.yaml` for a complete file.
 | comb_check | off | Kepler SC: `near_artefacts` or `always` |
 | comb_check_fap, comb_check_tolerance, comb_check_distance | 0.01, 0.3, 0.25 | test level; PSPS search range Δν(1 ± tolerance); distance to an artefact [envelope FWHM] |
 | comb_scan | false | comb scan of each final ν<sub>max</sub>: re-centre on the comb envelope or reject |
-| comb_scan_width, comb_scan_span | 3.0, 2.0 | window width [Δν]; scan range ν<sub>max</sub> ± span × envelope FWHM |
+| comb_scan_width, comb_scan_span | 4.0, 2.0 | window width [Δν]; scan range ν<sub>max</sub> ± span × envelope FWHM |
 | comb_scan_threshold, comb_scan_tolerance | 5.0, 0.1 | minimum peak z; convergence [envelope FWHM] |
 | comb_scan_max_iterations, comb_scan_max_refits | 5, 3 | scans per re-centring; refits after rejections |
+| cov_scan | false | CoV scan of each final ν<sub>max</sub>: power-excess check, own estimate |
+| cov_scan_width, cov_scan_span | 3.0, 2.0 | window width [Δν]; scan range ± span × envelope FWHM |
+| cov_scan_threshold, cov_scan_max_refits | 3.6, 1 | minimum peak z; refits after a non-significant scan |
 | background_correction | false | correct each fitted ν<sub>max</sub> for the background slope |
 | plot_psps | false | PSPS.png, Δν diagnostic (Δν estimates in `dnu_estimates`) |
 | psps_oversampling | 10 | zero padding of the PSPS (plots and Δν only; the test uses independent points) |
@@ -220,9 +250,10 @@ the YAML file. See `examples/KIC1872517.yaml` for a complete file.
   ACF_info/all_data.pkl.gz      every grid setting (curves, FAP, fit)
   CoV_info/all_data.pkl.gz
   ACF_info/numax_estimates.txt  numax per setting
-  figures/                      ACF, CoVs, PSPS, CombScan_*, lc_and_pg, full_spectrum_with_all_estimates
-  <target>_results.txt
+  figures/                      ACF, CoVs, PSPS, CombScan_*, CovScan_*, lc_and_pg, full_spectrum_with_all_estimates
+  <target>_results.txt          all estimates, incl. numax_combined
   <target>_comb_scan.txt        comb scan per method (comb_scan: true)
+  <target>_cov_scan.txt         CoV scan per method (cov_scan: true)
 ```
 
 Read a results file with `pickle.load(gzip.open(path))`.

@@ -106,12 +106,19 @@ class ProcessingConfig:
     comb_check_distance: float = 0.25       # near_artefacts: within this x envelope FWHM
     comb_scan: bool = False                 # any cadence: local 2D ACF around each final numax;
                                             # re-centre on the comb envelope (new numax) or reject
-    comb_scan_width: float = 3.0            # window width [Delta-nu]
+    comb_scan_width: float = 4.0            # window width [Delta-nu] (>= 3.06: the 9/4 D lag band must fit)
     comb_scan_span: float = 2.0             # scan numax +- span x envelope FWHM
     comb_scan_threshold: float = 5.0        # min. peak z of the envelope (white noise: ~1 %)
     comb_scan_tolerance: float = 0.1        # converged when the centre moves <= this x FWHM
     comb_scan_max_iterations: int = 5       # scans per re-centring
     comb_scan_max_refits: int = 3           # refits after rejections, then numax = NaN
+    cov_scan: bool = False                  # power-excess sanity check: CoV in constant windows
+                                            # around the shifted numax (report only)
+    cov_scan_width: float = 3.0             # window width [Delta-nu of the shifted numax]
+    cov_scan_span: float = 2.0              # re-centring and scan range +- span x envelope FWHM
+    cov_scan_threshold: float = 3.6         # min. peak z: 1 % false alarms per scan on white
+                                            # noise at width 3 (tall spikes pass at any z!)
+    cov_scan_max_refits: int = 1            # refits after a non-significant scan
     background_correction: bool = False     # numax -= alpha sigma^2 / numax (background slope)
 
     # Delta-nu diagnostic
@@ -148,12 +155,19 @@ class ProcessingConfig:
             raise ValueError("CONFIG.psps_oversampling must be a positive integer")
         self.psps_oversampling = int(self.psps_oversampling)
         for name in ("comb_scan_width", "comb_scan_span", "comb_scan_tolerance",
-                     "comb_scan_max_iterations"):
+                     "comb_scan_max_iterations", "cov_scan_width", "cov_scan_span"):
             if not getattr(self, name) > 0:
                 raise ValueError(f"CONFIG.{name} must be positive")
+        from .comb_scan import MIN_WIDTH
+        if self.comb_scan_width < MIN_WIDTH:
+            raise ValueError(f"CONFIG.comb_scan_width must be >= {MIN_WIDTH:.2f} (Delta-nu): the "
+                             "largest lag band (9/4 D) must fit inside a window")
         if int(self.comb_scan_max_refits) != self.comb_scan_max_refits or self.comb_scan_max_refits < 0:
             raise ValueError("CONFIG.comb_scan_max_refits must be a non-negative integer")
         self.comb_scan_max_refits = int(self.comb_scan_max_refits)
+        if int(self.cov_scan_max_refits) != self.cov_scan_max_refits or self.cov_scan_max_refits < 0:
+            raise ValueError("CONFIG.cov_scan_max_refits must be a non-negative integer")
+        self.cov_scan_max_refits = int(self.cov_scan_max_refits)
         self.comb_scan_max_iterations = int(self.comb_scan_max_iterations)
         if not 0 < self.comb_check_tolerance < 1:
             raise ValueError("CONFIG.comb_check_tolerance must be in (0, 1)")

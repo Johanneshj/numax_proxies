@@ -1,83 +1,88 @@
 """White-noise null of the comb-scan statistic, for src/numax_proxies/comb_scan_null.json.
 
-The comb scan collapses each window (relative power minus a straight line) to
-    c(D) = 1/2 [ mean r(k) over D/2 +- 0.1 D  +  mean r(k) over D +- 0.1 D ].
+The comb scan collapses each window (relative power minus a straight line) to the mean of
+the band means of r(k) over m D +- w D, weighted +1 (correlation) or -1 (anticorrelation,
+sign flipped), for the profiles in comb_scan.PROFILES: integer (1, 2), half (1/2, 3/2),
+combined (1/2, 1, 3/2, 2), anti (1/4 ... 9/4, weight -1) and total (combined + anti).
 For a window with only its MEAN removed, the white-noise mean and sd of c(D) are analytic
 (E r(k) = -(n-k)/n^2, Var r(k) = (n-k)/n^2, lags conditioned on the sum rule; as for the
 ACF delta_nu collapse). Removing a straight line shifts the mean slightly down and narrows
 the spread. This script simulates exponential (chi^2_2) white noise and stores the
-correction relative to the analytic values,
+correction relative to the analytic values, per profile,
     bias  b = (simulated mean - analytic mean) / simulated sd
     ratio s = simulated sd / analytic sd
-on a grid of window lengths n and x = D / n (D in frequency points). The comb scan uses
+on a grid of window lengths n, x = D / n (D in frequency points) and band half-widths w
+(the comb scan measures w from the data). The comb scan uses
     mean = analytic mean + b x s x analytic sd,   sd = s x analytic sd.
 
-    python scripts/make_comb_scan_null.py          (~2 min)
+    python scripts/make_comb_scan_null.py          (~5 min)
 """
 import json
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from numax_proxies.comb_scan import PROFILES, _collapse, profile_bands   # noqa: E402
+
 N_GRID = [100, 300, 1000, 3000, 10000, 40000]     # window length [points]
-X_GRID = np.round(np.arange(0.04, 0.801, 0.02), 4)  # D / n
+X_GRID = np.round(np.arange(0.04, 0.421, 0.02), 4)  # D / n (2.37 D must fit in the window)
+HW_GRID = [0.02, 0.04, 0.06, 0.08, 0.10, 0.12]       # band half-width [D]
 N_SIM = 4000
-HALF = 0.1
 OUT = Path(__file__).resolve().parents[1] / "src" / "numax_proxies" / "comb_scan_null.json"
 
 
-def band_edges(n, x):
-    d = np.round(x * n)
-    lo = np.array([np.ceil((m - HALF) * d) for m in (0.5, 1.0)]).astype(int)
-    hi = np.array([np.floor((m + HALF) * d) for m in (0.5, 1.0)]).astype(int)
-    return np.maximum(lo, 1), np.minimum(hi, n - 1)
-
-
-def collapse(r, lo, hi):
-    cs = np.concatenate([[0.0], np.cumsum(r)])
-    return 0.5 * sum((cs[hi[b] + 1] - cs[lo[b]]) / (hi[b] - lo[b] + 1) for b in range(2))
-
-
-def analytic(n, lo, hi):
+def analytic(n, lo, hi, w):
     k = np.arange(n)
     cs = np.concatenate([[0.0], np.cumsum((n - k) / n ** 2)])
+    nb = len(lo)
     mean = var0 = 0.0
-    for b in range(2):
+    for b in range(nb):
         cnt = hi[b] - lo[b] + 1
         s = cs[hi[b] + 1] - cs[lo[b]]
-        mean = mean - 0.5 * s / cnt
-        var0 = var0 + 0.25 * s / cnt ** 2
+        mean = mean - w[b] * s / cnt / nb
+        var0 = var0 + w[b] ** 2 * s / cnt ** 2 / nb ** 2
     return mean, np.sqrt(var0 - mean ** 2 * 2 * n / (n - 1))
 
 
 def main():
-    rng = np.random.default_rng(20261120)
-    bias, ratio = [], []
-    for n in N_GRID:
+    rng = np.random.default_rng(20261123)
+    shape = (len(N_GRID), X_GRID.size, len(HW_GRID))
+    out = {name: {"bias": np.zeros(shape), "sd_ratio": np.zeros(shape)} for name in PROFILES}
+    for i_n, n in enumerate(N_GRID):
         t0 = time.perf_counter()
-        lo, hi = band_edges(n, X_GRID)
-        i = np.arange(n)
+        d = np.round(X_GRID * n)
+        bands = {(name, hw): profile_bands(d, name, hw) for name in PROFILES for hw in HW_GRID}
+        t = np.arange(n) - 0.5 * (n - 1)
         nfft = 1 << int(np.ceil(np.log2(2 * n)))
-        s1 = np.zeros(X_GRID.size)
-        s2 = np.zeros(X_GRID.size)
+        s1 = {key: np.zeros(X_GRID.size) for key in bands}
+        s2 = {key: np.zeros(X_GRID.size) for key in bands}
         for _ in range(N_SIM):
             x = rng.exponential(size=n)
-            x = x - np.polyval(np.polyfit(i, x, 1), i)
+            x = x - x.mean() - t * (np.dot(t, x) / np.dot(t, t))
             c = np.fft.irfft(np.abs(np.fft.rfft(x, nfft)) ** 2, nfft)[:n]
-            v = collapse(c / c[0], lo, hi)
-            s1 += v
-            s2 += v * v
-        mu = s1 / N_SIM
-        sd = np.sqrt(s2 / N_SIM - mu ** 2)
-        am, asd = analytic(n, lo, hi)
-        bias.append(((mu - am) / sd).round(4).tolist())
-        ratio.append((sd / asd).round(4).tolist())
-        print(f"n = {n:6d}: bias {np.median(bias[-1]):+.3f}, sd ratio {np.median(ratio[-1]):.3f} "
-              f"(median over x), {time.perf_counter() - t0:.0f} s", flush=True)
+            r = c / c[0]
+            for key, (lo, hi, w) in bands.items():
+                v = _collapse(r, lo, hi, w)
+                s1[key] += v
+                s2[key] += v * v
+        for (name, hw), (lo, hi, w) in bands.items():
+            mu = s1[(name, hw)] / N_SIM
+            sd = np.sqrt(s2[(name, hw)] / N_SIM - mu ** 2)
+            am, asd = analytic(n, lo, hi, w)
+            out[name]["bias"][i_n, :, HW_GRID.index(hw)] = (mu - am) / sd
+            out[name]["sd_ratio"][i_n, :, HW_GRID.index(hw)] = sd / asd
+        print(f"n = {n:6d}: " + ", ".join(
+            f"{name} bias {np.median(out[name]['bias'][i_n]):+.3f} ratio {np.median(out[name]['sd_ratio'][i_n]):.3f}"
+            for name in PROFILES) + f" ({time.perf_counter() - t0:.0f} s)", flush=True)
     OUT.write_text(json.dumps({"description": __doc__.split("\n\n")[0], "n_sim": N_SIM,
-                               "n": N_GRID, "x": X_GRID.tolist(), "bias": bias,
-                               "sd_ratio": ratio}, indent=1))
+                               "n": N_GRID, "x": X_GRID.tolist(), "half_width": HW_GRID,
+                               "profiles": {name: dict(bands=[list(b) for b in PROFILES[name]],
+                                                       bias=v["bias"].round(4).tolist(),
+                                                       sd_ratio=v["sd_ratio"].round(4).tolist())
+                                            for name, v in out.items()}}, indent=1))
     print("wrote", OUT)
 
 

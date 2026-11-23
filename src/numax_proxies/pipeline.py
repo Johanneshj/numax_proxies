@@ -6,6 +6,7 @@
     proxy.compute_numax_from_scaling_relations()   # needs Gaia and/or STAR parameters
     proxy.plotting()
     proxy.results                                  # DataFrame: label, numax, numax_err
+                                                   # (incl. numax_combined: mean of the estimates)
     proxy.comb_scan_table                          # with CONFIG.comb_scan: per method
 
 The running median and the relative power of a spectrum are computed once and shared by the
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from uncertainties import ufloat
 
 from . import lightcurve as lcp
 from .binning import DEFAULT_MEDIAN_FILTER_FACTOR, running_median
@@ -51,6 +53,7 @@ class NumaxProxies:
         self.artefact_report = []
         self.dnu_estimates = {}
         self.comb_scan_results = {}
+        self.cov_scan_results = {}
         self._medians = {}                   # (id(power), factor) -> (power, running median)
         self._relative = {}                  # (id(power), factor) -> (power, P / median - 1)
         self._checkers = {}                  # (id(power), factor) -> (power, CombChecker)
@@ -257,6 +260,8 @@ class NumaxProxies:
             if not cfg.replace_below_min_freq:
                 method.comb_checker = self._comb_checker(spec, cfg.median_filter_factor)
         method.compute()
+        if self.config.cov_scan:                         # on the method's own estimate
+            self._cov_scan(method, label, cfg.plot)
         if self.config.comb_scan:
             self._comb_scan(method, label, cfg.plot)
         if cfg.plot:
@@ -266,7 +271,85 @@ class NumaxProxies:
         if cfg.save_results:
             method.save_numax_estimates()
         self.numax_estimates[label] = method.numax_estimate
+        if self.config.cov_scan:
+            name = "ACF" if label == "numax_2DACF" else "CoV"
+            acc = getattr(method, "cov_scan", {}).get("accepted")
+            self.numax_estimates[f"numax_CoVscan_{name}"] = (acc["numax_cov"] if acc
+                                                              else ufloat(np.nan, np.nan))
+        self._update_combined()
         return method
+
+    COMBINED_FROM = ("numax_2DACF", "numax_CoV", "numax_CoVscan_ACF", "numax_CoVscan_CoV")
+
+    def _update_combined(self):
+        """numax_estimates["numax_combined"]: the mean of the available seismic estimates (ACF,
+        CoV, and the CoV-scan centres; NaN ones left out). Uncertainty: the spread (standard
+        deviation) of those estimates, or the formal error if there is only one."""
+        vals = [self.numax_estimates[k] for k in self.COMBINED_FROM
+                if k in self.numax_estimates and np.isfinite(self.numax_estimates[k].n)]
+        if not vals:
+            combined = ufloat(np.nan, np.nan)
+        elif len(vals) == 1:
+            combined = vals[0]
+        else:
+            x = np.array([v.n for v in vals])
+            combined = ufloat(float(x.mean()), float(x.std(ddof=1)))
+        self.numax_estimates.pop("numax_combined", None)    # keep it last
+        self.numax_estimates["numax_combined"] = combined
+
+    def _cov_scan(self, method, label, plot):
+        """CoV scan of the method's numax (CONFIG.cov_scan); report only.
+
+        If the scan is not significant, the grid fits are repeated with one envelope FWHM around
+        the rejected numax excluded and the new estimate is scanned (cov_scan_max_refits times).
+        The refits use a copy of the grid results: the method (and the comb scan after it)
+        keeps its own fits.
+
+        Args:
+            method: computed NumaxFromACF or NumaxFromCoV.
+            label: key in numax_estimates.
+            plot: also save CovScan_<ACF|CoV>.png (the accepted scan, else the first).
+        """
+        import copy
+        from .cov_scan import cov_scan, significant
+        cfg, name = self.config, "ACF" if label == "numax_2DACF" else "CoV"
+        spec = self._spectrum_for_methods()
+        rel = self.relative_power(spec)
+        saved = copy.deepcopy(method.results), getattr(method, "numax_override", None)
+        original = method.numax_estimate.n
+        rejected, attempts, accepted = [], [], None
+        try:
+            for _ in range(cfg.cov_scan_max_refits + 1):
+                start = method.numax_estimate.n
+                if not np.isfinite(start):
+                    break
+                r = cov_scan(spec.frequency, rel, start, cfg.cov_scan_width, cfg.cov_scan_span)
+                if r is None:
+                    break
+                r["significant"] = significant(r, cfg.cov_scan_threshold)
+                attempts.append(r)
+                if r["significant"]:
+                    accepted = r
+                    break
+                rejected.append(start)
+                method.refit(rejected)
+        finally:                                           # the method keeps its own fits
+            method.results, method.numax_override = saved
+        result = dict(original=original, rejected=rejected, attempts=attempts, accepted=accepted)
+        method.cov_scan = result
+        self.cov_scan_results[name] = result
+        if not attempts:
+            logger.warning("%s: CoV scan not possible around the %s numax", self.star.target, name)
+            return
+        shown = accepted or attempts[0]
+        logger.info("%s: CoV scan %s: guess %.1f, shifted %.1f, centre %.1f muHz, peak z %.1f (%s%s)",
+                    self.star.target, name, shown["numax"], shown["scan_centre"],
+                    shown["numax_cov"].n, shown["peak_z"],
+                    "significant" if accepted else "not significant",
+                    f", after {len(rejected)} refit(s)" if accepted and rejected else "")
+        if plot:
+            from .plotting import plot_cov_scan
+            plot_cov_scan(shown, rel, spec.frequency, name, cfg, self.star.target)
 
     def _comb_scan(self, method, label, plot):
         """Comb scan of the method's final numax (CONFIG.comb_scan).
@@ -281,7 +364,6 @@ class NumaxProxies:
             label: key in numax_estimates.
             plot: also save CombScan_<ACF|CoV>.png.
         """
-        from uncertainties import ufloat
         from .comb_scan import recentre
         cfg, name = self.config, "ACF" if label == "numax_2DACF" else "CoV"
         spec = self._spectrum_for_methods()
@@ -325,12 +407,8 @@ class NumaxProxies:
             shown = accepted or next((r for r in attempts if r["scans"]), None)
             if shown and shown["scans"]:
                 from .plotting import plot_comb_scan
-                note = (f"{shown['status']}, {len(shown['scans'])} scan(s), start "
-                        f"{shown['start']:.1f}" + (f", rejected {len(rejected)}" if rejected else ""))
-                if accepted and cfg.background_correction:
-                    note += f"\nbackground-corrected: {method.numax_override.n:.1f}"
                 plot_comb_scan(shown["scans"][-1], rel, spec.frequency, name, cfg,
-                               self.star.target, note)
+                               self.star.target)
 
     def compute_numax_from_acf(self):
         """Run the ACF method; result in numax_estimates['numax_2DACF'] and self.acf."""
@@ -405,7 +483,33 @@ class NumaxProxies:
             if self.comb_scan_results:
                 self.comb_scan_table.to_csv(self.out_dir / f"{self.star.target}_comb_scan.txt",
                                             index=False)
+            if self.cov_scan_results:
+                self.cov_scan_table.to_csv(self.out_dir / f"{self.star.target}_cov_scan.txt",
+                                           index=False)
         return df
+
+    @property
+    def cov_scan_table(self) -> pd.DataFrame:
+        """CoV scan per method (CONFIG.cov_scan).
+
+        Returns:
+            DataFrame: method, numax_original (the method's estimate), rejected (estimates without
+            a significant excess), start (estimate of the accepted scan), shifted (power-excess
+            peak), numax_cov (fitted centre), numax_cov_err, peak_z, significant, n (points per
+            window); for a rejected star the values of the first scan.
+        """
+        rows = []
+        for k, c in self.cov_scan_results.items():
+            a = c["accepted"] or (c["attempts"][0] if c["attempts"] else None)
+            rows.append({"method": k, "numax_original": c["original"],
+                         "rejected": ";".join(f"{v:.2f}" for v in c["rejected"]),
+                         "start": a["numax"] if a else np.nan,
+                         "shifted": a["scan_centre"] if a else np.nan,
+                         "numax_cov": a["numax_cov"].n if a else np.nan,
+                         "numax_cov_err": a["numax_cov"].s if a else np.nan,
+                         "peak_z": a["peak_z"] if a else np.nan,
+                         "significant": c["accepted"] is not None, "n": a["n"] if a else np.nan})
+        return pd.DataFrame(rows)
 
     @property
     def comb_scan_table(self) -> pd.DataFrame:
@@ -415,7 +519,8 @@ class NumaxProxies:
             DataFrame: method, numax_original (before the comb scan), rejected (numax values
             without a significant envelope), start (numax the accepted scan started from),
             numax (final, background-corrected if CONFIG.background_correction), numax_comb
-            (comb-scan centre), numax_err, status, n_scans, peak_z (last scan), D [muHz].
+            (comb-scan centre), numax_err, status, n_scans, peak_z (last scan, integer profile;
+            peak_z_half, _combined, _anti, _total: the diagnostic profiles), D [muHz].
         """
         rows = []
         for k, c in self.comb_scan_results.items():
@@ -430,5 +535,9 @@ class NumaxProxies:
                          "status": a["status"] if a else "rejected",
                          "n_scans": len(a["scans"]) if a else 0,
                          "peak_z": last["peak_z"] if a else np.nan,
+                         "peak_z_half": last["profiles"]["half"]["peak_z"] if a else np.nan,
+                         "peak_z_combined": last["profiles"]["combined"]["peak_z"] if a else np.nan,
+                         "peak_z_anti": last["profiles"]["anti"]["peak_z"] if a else np.nan,
+                         "peak_z_total": last["profiles"]["total"]["peak_z"] if a else np.nan,
                          "D": last["D"] if a else np.nan})
         return pd.DataFrame(rows)

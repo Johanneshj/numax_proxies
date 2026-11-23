@@ -353,7 +353,10 @@ def plot_cov(method):
 
 
 # --------------------------------------------------------------------------------------
-STYLES = {  # label substring -> (line style, colour, legend label)
+STYLES = {  # label substring -> (line style, colour, legend label); first match wins
+    "combined": ("-", "k", r"$\nu_\mathrm{max}$ (mean)"),
+    "CoVscan_ACF": ((0, (1, 1)), "darkorange", r"$\nu_\mathrm{max}^\mathrm{CoV\,scan}$ (ACF)"),
+    "CoVscan_CoV": ((0, (1, 1)), "saddlebrown", r"$\nu_\mathrm{max}^\mathrm{CoV\,scan}$ (CoV)"),
     "CoV": ((0, (3, 1, 1, 1)), "mediumorchid", r"$\nu_\mathrm{max}^\mathrm{CoV}$"),
     "2DACF": ((0, (5, 1)), "forestgreen", r"$\nu_\mathrm{max}^\mathrm{ACF}$"),
     "SR_logg_teff": ((0, (1, 5)), "dodgerblue", r"$\nu_\mathrm{max}^{gT_\mathrm{eff}^{-1/2}}$"),
@@ -423,12 +426,15 @@ def plot_psps(curves, config, target):
 
 # --------------------------------------------------------------------------------------
 @_aa_style
-def plot_comb_scan(r, rel_power, frequency, name, config, target, note=""):
-    """Save CombScan_<name>: one comb scan (see comb_scan.py), dashed blue = the numax it
-    was centred on, dotted red = fitted centre.
+def plot_comb_scan(r, rel_power, frequency, name, config, target):
+    """Save CombScan_<name>: one comb scan (see comb_scan.py); the legend of the top panel names
+    the lines: guess numax (the ACF / CoV estimate), shifted numax (the power-excess peak the scan
+    was re-centred on), comb centre (the fitted centre).
 
     Panels: relative power around numax; local 2D ACF (r / sd(r), lag in Delta-nu of the
-    tested numax) with the two lag bands; collapsed profile z with the Gaussian fit.
+    shifted numax) with the lag bands (red = correlation, blue = anticorrelation, numbered
+    1 = D/4 ... 9 = 9D/4, +- 0.1 D); the collapsed profiles with the Gaussian fit of the deciding
+    (integer) one.
 
     Args:
         r: dict from comb_scan.comb_scan.
@@ -437,42 +443,106 @@ def plot_comb_scan(r, rel_power, frequency, name, config, target, note=""):
         name: "ACF" or "CoV".
         config: ProcessingConfig.
         target: star name.
-        note: extra text for the label (e.g. the re-centring status).
     """
     numax, centres = r["numax"], r["centres"]
-    pct = r"\%" if plt.rcParams["text.usetex"] else "%"
     fig, axs = plt.subplots(3, 1, figsize=(COLUMN_WIDTH, 5.6), sharex=True,
                             gridspec_kw=dict(height_ratios=[0.8, 1.1, 1]))
     m = (frequency >= centres[0]) & (frequency <= centres[-1])
     w = max(1, int(round(0.05 * r["dnu"] / (frequency[1] - frequency[0]))))
     ax = axs[0]
-    ax.plot(frequency[m], rel_power[m] + 1, c="0.75", lw=0.3, rasterized=True)
+    ax.plot(frequency[m], rel_power[m] + 1, c="0.75", lw=0.3, rasterized=True, label="spectrum")
     ax.plot(frequency[m], np.convolve(rel_power[m] + 1, np.ones(w) / w, "same"), c="k", lw=0.6,
-            rasterized=True)
+            rasterized=True, label="smoothed")
     ax.set(ylabel="P / median", ylim=(0, np.percentile(rel_power[m] + 1, 99.9) * 1.1))
-    ax.text(0.02, 0.95, f"{target}, {name}" + (f"\n{note}" if note else ""), transform=ax.transAxes, va="top", fontsize=7,
-            bbox=dict(facecolor="white", alpha=0.8, lw=0))
 
     ax = axs[1]
     ax.imshow(np.clip(r["map"], -4, 4), aspect="auto", origin="lower", cmap="RdBu_r", vmin=-4,
               vmax=4, extent=[centres[0], centres[-1], 0, r["width"]], rasterized=True)
     d = r["D"] / r["dnu"]
-    for mult in (0.5, 1.0):
-        for y in ((mult - 0.1) * d, (mult + 0.1) * d):
-            ax.axhline(y, c="k", lw=0.5, ls="--")
+    from .comb_scan import HALF, PROFILES
+    peaks = {m: HALF for m, _ in PROFILES["combined"]}          # {multiple: half-width}
+    dips = {m: HALF for m, _ in PROFILES["anti"]}
+    # bands in use: red = correlation, blue = anticorrelation; numbered by position
+    # (1 = D/4, 2 = D/2, ..., 9 = 9D/4) so a number means the same lag in every star
+    for bands, colour in ((peaks, "red"), (dips, "blue")):
+        for mult, hw in bands.items():
+            ax.axhspan((mult - hw) * d, (mult + hw) * d, color=colour, alpha=0.18, lw=0)
+            for y in ((mult - hw) * d, (mult + hw) * d):          # band edges
+                ax.axhline(y, c=colour, lw=0.5)
+            ax.text(1.01, mult * d / r["width"], str(int(round(4 * mult))), color=colour,
+                    transform=ax.transAxes, ha="left", va="center", fontsize=6)
     ax.set(ylabel=r"lag [$\Delta\nu$]")
 
     ax = axs[2]
     ax.axhline(0, c="0.5", lw=0.5)
-    ax.plot(centres, r["z"], c="k", lw=0.8)
+    prof = r["profiles"]
+    for key, colour, lw in (("total", "tab:purple", 0.6), ("anti", "tab:cyan", 0.6),
+                            ("combined", "0.6", 0.6), ("half", "tab:orange", 0.7),
+                            ("integer", "k", 0.9)):
+        ax.plot(centres, prof[key]["z"], c=colour, lw=lw, label=key)
     if r["popt"] is not None:
         xs = np.linspace(centres[0], centres[-1], 400)
-        ax.plot(xs, gaussian(xs, *r["popt"]), c="tab:red", lw=0.9)
+        ax.plot(xs, gaussian(xs, *r["popt"]), c="tab:red", lw=0.9, label="fit (integer)")
         ax.axvline(r["numax_comb"].n, c="tab:red", lw=0.7, ls=":")
-        ax.set_title(rf"peak $z$ = {r['peak_z']:.1f}, centre = {r['numax_comb'].n:.1f} "
-                     rf"{_mu()}Hz ({100 * r['offset']:+.1f} {pct})", fontsize=7)
+    ax.legend(loc="upper right", fontsize=5, frameon=True, framealpha=0.8, edgecolor="none")
     ax.set(xlabel=_freq_label("window centre"), ylabel="$z$")
-    for ax in axs:
-        ax.axvline(numax, c="tab:blue", lw=0.7, ls="--")
+    for i, ax in enumerate(axs):
+        top = i == 0
+        ax.axvline(numax, c="tab:blue", lw=0.7, ls="--", label=r"guess $\nu_\mathrm{max}$" if top else None)
+        if abs(r.get("scan_centre", numax) - numax) > 1e-6:     # scan re-centred on the excess
+            ax.axvline(r["scan_centre"], c="0.4", lw=0.7, ls="-.", label=r"shifted $\nu_\mathrm{max}$" if top else None)
+        if r["popt"] is not None and i < 2:
+            ax.axvline(r["numax_comb"].n, c="tab:red", lw=0.7, ls=":", label="comb centre" if top else None)
+    axs[0].legend(loc="upper right", fontsize=5, frameon=True, framealpha=0.8, edgecolor="none")
     fig.tight_layout(h_pad=0.4)
     _save(fig, config, target, f"CombScan_{name}")
+
+
+
+# --------------------------------------------------------------------------------------
+@_aa_style
+def plot_cov_scan(r, rel_power, frequency, name, config, target):
+    """Save CovScan_<name>: the CoV scan (see cov_scan.py), 2 x 1.
+
+    Top: the spectrum segment (P / median and smoothed). Bottom: CoV per window against the
+    window centre, with the Gaussian fit, the white-noise level and the significance
+    threshold. Lines: guess numax, shifted numax (power-excess peak), CoV centre (fit).
+
+    Args:
+        r: dict from cov_scan.cov_scan (with "significant").
+        rel_power: relative power P / median - 1.
+        frequency: frequency grid [muHz].
+        name: "ACF" or "CoV".
+        config: ProcessingConfig.
+        target: star name.
+    """
+    centres, n = r["centres"], r["n"]
+    fig, axs = plt.subplots(2, 1, figsize=(COLUMN_WIDTH, 4.0), sharex=True,
+                            gridspec_kw=dict(height_ratios=[1, 1]))
+    m = (frequency >= centres[0]) & (frequency <= centres[-1])
+    w = max(1, int(round(0.05 * r["dnu"] / (frequency[1] - frequency[0]))))
+    ax = axs[0]
+    ax.plot(frequency[m], rel_power[m] + 1, c="0.75", lw=0.3, rasterized=True, label="spectrum")
+    ax.plot(frequency[m], np.convolve(rel_power[m] + 1, np.ones(w) / w, "same"), c="k", lw=0.6,
+            rasterized=True, label="smoothed")
+    ax.set(ylabel="P / median", ylim=(0, np.percentile(rel_power[m] + 1, 99.9) * 1.1))
+
+    ax = axs[1]
+    mean0, sd0 = 1.0 - 1.0 / n, 1.0 / np.sqrt(n)               # white noise: CoV mean and sd
+    ax.axhline(mean0, c="0.5", lw=0.5, label="noise")
+    ax.axhline(mean0 + config.cov_scan_threshold * sd0, c="green", lw=0.6, ls="--",
+               label="threshold")
+    ax.plot(centres, r["cov"], c="k", lw=0.8, label="CoV")
+    if r["popt"] is not None:
+        xs = np.linspace(centres[0], centres[-1], 400)
+        ax.plot(xs, mean0 + gaussian(xs, *r["popt"]) * sd0, c="tab:red", lw=0.9, label="fit")
+    ax.set(xlabel=_freq_label("window centre"), ylabel="CoV (window)")
+    for i, ax in enumerate(axs):
+        top = i == 0
+        ax.axvline(r["numax"], c="tab:blue", lw=0.7, ls="--", label=r"guess $\nu_\mathrm{max}$" if top else None)
+        ax.axvline(r["scan_centre"], c="0.4", lw=0.7, ls="-.", label=r"shifted $\nu_\mathrm{max}$" if top else None)
+        if r["popt"] is not None:
+            ax.axvline(r["numax_cov"].n, c="tab:red", lw=0.7, ls=":", label="CoV centre" if top else None)
+        ax.legend(loc="upper right", fontsize=5, frameon=True, framealpha=0.8, edgecolor="none")
+    fig.tight_layout(h_pad=0.4)
+    _save(fig, config, target, f"CovScan_{name}")

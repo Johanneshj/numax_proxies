@@ -54,12 +54,17 @@ CONFIG:
   # checks of the fitted numax
   comb_check: 'off'           # Kepler SC: off | near_artefacts | always (PSPS test of every fit)
   comb_scan: false            # local 2D ACF around each final numax: re-centre or reject
-  comb_scan_width: 3.0        # window width [Delta-nu]
+  comb_scan_width: 4.0        # window width [Delta-nu] (>= 3.06)
   comb_scan_span: 2.0         # scan numax +- span x envelope FWHM
   comb_scan_threshold: 5.0    # minimum peak z of the envelope (~1 % false alarms)
   comb_scan_tolerance: 0.1    # converged when the centre moves <= this x FWHM
   comb_scan_max_iterations: 5
   comb_scan_max_refits: 3
+  cov_scan: false             # power-excess check: CoV in constant windows (own estimate)
+  cov_scan_width: 3.0         # window width [Delta-nu]
+  cov_scan_span: 2.0          # scan range +- span x envelope FWHM
+  cov_scan_threshold: 3.6     # minimum peak z (1 % false alarms per scan on white noise)
+  cov_scan_max_refits: 1
   background_correction: false  # numax -= alpha sigma^2 / numax (background slope)
   # Delta-nu diagnostic
   plot_psps: false            # PSPS.png around the ACF and CoV numax
