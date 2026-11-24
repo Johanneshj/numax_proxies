@@ -1,14 +1,8 @@
-"""numax from the coefficient of variation (CoV = std / mean) of the PSD in bins
+"""CoV method: numax from the coefficient of variation (std / mean) of P / median in bins
 (Bell+2019, Viani+2019).
 
-Steps, for every (overlap_scale, width_factor) on the grid:
-  1. normalised power  P / median, running median over median_filter_factor x FWHM
-  2. bins of width_factor x Delta-nu(nu), overlap_scale bins per bin width
-  3. CoV per bin (sample std, ddof = 1); white noise gives CoV ~ 1
-  4. smoothing over smoothing_factor x envelope FWHM
-  5. initial numax: highest smoothed CoV among bins whose raw CoV exceeds the FAP
-     threshold (and stays below the CoV upper limit if possible)
-  6. Gaussian (offset 1) fit within +- 1 envelope FWHM of the initial numax
+For every grid setting: bin P / median (width w x Delta-nu), compute the CoV per bin, smooth,
+start at the highest significant bin and fit a Gaussian (offset 1). numax = median over the grid.
 """
 import logging
 import time
@@ -36,11 +30,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------------------
 @njit(cache=True)
 def _prefix_sums(power):
-    """Cumulative sums of power and power^2.
-
-    Returns:
-        (sum, sum of squares, count of non-finite values), each of length n + 1.
-    """
+    """Cumulative sums of power and power^2, and the count of non-finite values."""
     n = len(power)
     s = np.zeros(n + 1)
     sq = np.zeros(n + 1)
@@ -58,7 +48,7 @@ def _prefix_sums(power):
 
 @njit(cache=True)
 def _cov_two_pass(power, start, end):
-    """CoV of power[start:end] with a two-pass variance (precision fallback); 1 if undefined."""
+    """CoV of one bin with a two-pass variance (precision fallback); 1 if undefined."""
     n = end - start
     if n <= 1:
         return 1.0
@@ -80,16 +70,7 @@ def _cov_two_pass(power, start, end):
 
 @njit(cache=True)
 def cov_in_windows(power, idx_start, idx_end, s, sq, bad):
-    """CoV = std (ddof = 1) / mean of every bin.
-
-    Args:
-        power: normalised power.
-        idx_start, idx_end: bin i covers power[idx_start[i]:idx_end[i]].
-        s, sq, bad: output of _prefix_sums(power).
-
-    Returns:
-        CoV per bin; 1 for empty, 1-point or non-finite bins.
-    """
+    """CoV (std / mean) of every bin; 1 for empty or undefined bins."""
     eps = 2.220446049250313e-16
     out = np.empty(len(idx_start))
     for i in range(len(idx_start)):
@@ -118,19 +99,7 @@ def cov_in_windows(power, idx_start, idx_end, s, sq, bad):
 
 
 def normalized_power(frequency, power, cfg, seed, med=None):
-    """Normalised power P / median.
-
-    Args:
-        frequency: frequency grid [muHz].
-        power: PSD.
-        cfg: COVConfig (min_freq, replace_below_min_freq, median_filter_factor).
-        seed: random seed for the white-noise replacement.
-        med: running median of power with cfg.median_filter_factor (not used
-            with replace_below_min_freq); None = computed here.
-
-    Returns:
-        (normalised power, running median).
-    """
+    """Normalised power P / median and the running median."""
     frequency = np.ascontiguousarray(frequency, dtype=np.float64)
     power = np.ascontiguousarray(power, dtype=np.float64)
     if cfg.replace_below_min_freq:
@@ -141,17 +110,7 @@ def normalized_power(frequency, power, cfg, seed, med=None):
 
 
 def calculate_covs(frequency, norm_power, cfg) -> dict:
-    """Raw and smoothed CoV for every grid setting.
-
-    Args:
-        frequency: frequency grid [muHz], ascending.
-        norm_power: normalised power.
-        cfg: COVConfig.
-
-    Returns:
-        {(overlap_scale, width_factor, smoothing_factor): {bin_centers, N_data_points_in_bin,
-        cov, cov_smoothed}}.
-    """
+    """Raw and smoothed CoV for every grid setting."""
     t0 = time.perf_counter()
     frequency = np.ascontiguousarray(frequency, dtype=np.float64)
     if np.any(np.diff(frequency) < 0):
@@ -178,14 +137,7 @@ def calculate_covs(frequency, norm_power, cfg) -> dict:
 # Fitting
 # --------------------------------------------------------------------------------------
 def initial_numax_from_cov(data) -> float:
-    """Starting guess: highest smoothed CoV among the significant bins.
-
-    Args:
-        data: one grid setting (bin_centers, cov, cov_smoothed, fap).
-
-    Returns:
-        Bin centre [muHz], preferring bins below the CoV upper limit; NaN if none is significant.
-    """
+    """Starting guess: the highest smoothed CoV among the significant bins (NaN if none)."""
     bcs = np.asarray(data["bin_centers"], dtype=float)
     cov = np.asarray(data["cov"], dtype=float)
     scov = np.asarray(data["cov_smoothed"], dtype=float)
@@ -201,23 +153,13 @@ def initial_numax_from_cov(data) -> float:
 
 
 def _peak_cov(x, y, centre, half_width) -> float:
-    """Highest CoV within +- half_width of centre (nearest point if the window is empty)."""
+    """Highest CoV within +- half_width of centre."""
     inside = np.abs(x - centre) <= half_width
     return float(np.max(y[inside])) if np.any(inside) else float(y[np.argmin(np.abs(x - centre))])
 
 
 def fit_gaussian(x, y, numax_init):
-    """Gaussian (offset 1) fit to the smoothed CoV.
-
-    Args:
-        x: bin centres [muHz].
-        y: smoothed CoV.
-        numax_init: starting guess [muHz].
-
-    Returns:
-        (ufloat(numax, formal error), [amp, sigma, centre], status); status is "fit",
-        "rejected" (peak above the CoV upper limit, or centre on the edge of x) or "failed".
-    """
+    """Gaussian (offset 1) fit to the smoothed CoV: (numax, params, status = fit | rejected | failed)."""
     nan_result = ufloat(np.nan, np.nan), np.full(3, np.nan), "failed"
     rejected = ufloat(np.nan, np.nan), np.full(3, np.nan), "rejected"
     if numax_init is None or not np.isfinite(numax_init) or numax_init <= 0:
@@ -254,15 +196,7 @@ def fit_gaussian(x, y, numax_init):
 
 
 def weighted_mean_numax(x, y):
-    """CoV-weighted mean frequency (Viani+2019 fallback).
-
-    Args:
-        x: bin centres [muHz].
-        y: smoothed CoV.
-
-    Returns:
-        ufloat(weighted mean, std of x).
-    """
+    """CoV-weighted mean frequency (fallback when no Gaussian fits)."""
     denominator = np.sum(y)
     if not np.isfinite(denominator) or denominator == 0:
         return ufloat(np.nan, np.nan)
@@ -284,11 +218,7 @@ def _mask_near(bcs, values, centres):
 
 
 def _fit_one(data, initial_numax, use_fallback, at_numax):
-    """Fit one grid setting.
-
-    Returns:
-        (ufloat numax, params dict, fit_type).
-    """
+    """Fit one grid setting: (numax, params, fit_type)."""
     nan_params = {"amp": np.nan, "sigma": np.nan, "numax": np.nan, "numax_err": np.nan}
     none = ufloat(np.nan, np.nan), dict(nan_params), "none"
     numax_init = initial_numax if initial_numax is not None else initial_numax_from_cov(data)
@@ -324,19 +254,8 @@ def fit_all(results, initial_numax=None, use_fallback=True, at_numax=False,
             comb_checker=None, exclude=()) -> dict:
     """Fit every grid setting (in place).
 
-    Args:
-        results: output of calculate_covs with "fap" added.
-        initial_numax: starting guess [muHz]; None = from each setting's significant bins.
-        use_fallback: use the weighted mean when no Gaussian fit is possible.
-        at_numax: require a significant bin within one envelope FWHM of the result.
-        comb_checker: callable numax -> bool (artefacts.CombChecker) or None. A fit that fails
-            it is repeated with one envelope FWHM around it excluded (MAX_COMB_RETRIES times).
-        exclude: numax values [muHz]; bins within one envelope FWHM of each are left out of
-            every fit (comb scan rejections; the starting guess is then not used).
-
-    Returns:
-        results, with fit_numax (ufloat), fit_params and fit_type ("gaussian", "fallback",
-        "rejected", "not_significant", "no_comb" or "none") per setting.
+    A fit that fails the comb check is redone without that region; bins near the values in
+    exclude are left out (comb-scan rejections).
     """
     counts = dict.fromkeys(("gaussian", "fallback", "rejected", "not_significant", "no_comb",
                             "none"), 0)
@@ -381,13 +300,7 @@ class NumaxFromCoV:
     info_folder = "CoV_info"
 
     def __init__(self, psd, cov_config, config, target="unknown", initial_numax=None):
-        """Args:
-            psd: PSDData.
-            cov_config: COVConfig.
-            config: ProcessingConfig.
-            target: star name (output folder).
-            initial_numax: starting guess for the fits [muHz] or None.
-        """
+        """Set up the method; the pipeline fills in median, comb_checker and background_median."""
         self.frequency = psd.frequency
         self.power = psd.psd
         self.cfg = cov_config
@@ -400,11 +313,7 @@ class NumaxFromCoV:
         self.background_median = None        # set -> background-corrected numax per fit
 
     def compute(self):
-        """Normalised power, CoV, thresholds and fits for every grid setting.
-
-        Returns:
-            self (results in self.results).
-        """
+        """Normalised power, CoV, thresholds and fits for every grid setting."""
         t0 = time.perf_counter()
         with numba_threads(self.config.n_threads):
             self.normalized_power, self.med_filter = normalized_power(
@@ -427,14 +336,7 @@ class NumaxFromCoV:
         return self
 
     def refit(self, exclude):
-        """Repeat the fits with bins within one envelope FWHM of each value in exclude left out.
-
-        Args:
-            exclude: numax values [muHz].
-
-        Returns:
-            self.
-        """
+        """Repeat the fits without the bins near the numax values in exclude."""
         self.results = fit_all(self.results, self.initial_numax, self.cfg.use_fallback,
                                self.cfg.significance_at_numax, self._checker, list(exclude))
         self._correct_background()
@@ -447,8 +349,7 @@ class NumaxFromCoV:
 
     @property
     def numax_estimate(self):
-        """Median numax and median formal error over the grid (ufloat), or the comb-scan
-        numax if the comb scan set one (numax_override)."""
+        """Median numax over the grid, or the comb-scan numax if one was set."""
         if getattr(self, "numax_override", None) is not None:
             return self.numax_override
         return median_estimate(self.results)
@@ -458,14 +359,14 @@ class NumaxFromCoV:
         return Path(self.config.results_directory) / str(self.id) / self.info_folder
 
     def save_all_data(self):
-        """Save all results as CoV_info/all_data.pkl.gz."""
+        """Save all results as all_data.pkl.gz."""
         save_pickle(self.results, self._dir() / "all_data.pkl.gz")
 
     def save_numax_estimates(self):
-        """Save numax per grid setting as CoV_info/numax_estimates.txt."""
+        """Save numax per grid setting as numax_estimates.txt."""
         save_numax_estimates(self.results, self._dir() / "numax_estimates.txt")
 
     def plot(self):
-        """Save CoVs.png (CoV curves, fits and the CoV upper limit)."""
+        """Save CoVs.png (curves, fits and the CoV upper limit)."""
         from ..plotting import plot_cov
         plot_cov(self)

@@ -3,14 +3,13 @@
     proxy = NumaxProxies.read_yaml("star.yaml").run()
     proxy.compute_numax_from_acf()
     proxy.compute_numax_from_CoV()
+    proxy.compute_numax_from_acv()                 # optional third proxy
     proxy.compute_numax_from_scaling_relations()   # needs Gaia and/or STAR parameters
     proxy.plotting()
-    proxy.results                                  # DataFrame: label, numax, numax_err
-                                                   # (incl. numax_combined: mean of the estimates)
-    proxy.comb_scan_table                          # with CONFIG.comb_scan: per method
+    proxy.results                                  # label, numax, numax_err (incl. numax_combined)
+    proxy.comb_scan_table, proxy.cov_scan_table    # with CONFIG.comb_scan / cov_scan
 
-The running median and the relative power of a spectrum are computed once and shared by the
-cleaning, both methods, the comb check and the comb scan.
+The running median and relative power of a spectrum are computed once and shared.
 """
 import logging
 from pathlib import Path
@@ -24,7 +23,7 @@ from .binning import DEFAULT_MEDIAN_FILTER_FACTOR, running_median
 from .config import GlobalConfig, load_config
 from .data import GaiaData, PSDData
 from .io import load_psd, save_lightcurve, save_psd
-from .methods import NumaxFromACF, NumaxFromCoV, numax_from_scaling_relations
+from .methods import NumaxFromACF, NumaxFromACV, NumaxFromCoV, numax_from_scaling_relations
 from .spectrum import averaged_psd, periodogram
 
 logger = logging.getLogger(__name__)
@@ -33,9 +32,7 @@ logger = logging.getLogger(__name__)
 class NumaxProxies:
 
     def __init__(self, global_config: GlobalConfig):
-        """Args:
-            global_config: GlobalConfig (see load_config / config_from_dict).
-        """
+        """Set up from a GlobalConfig (see load_config / config_from_dict)."""
         self.settings = global_config
         self.star = global_config.star
         self.config = global_config.config
@@ -60,30 +57,13 @@ class NumaxProxies:
 
     @classmethod
     def read_yaml(cls, yaml_path: str) -> "NumaxProxies":
-        """Create from a YAML configuration file.
-
-        Args:
-            yaml_path: path to the YAML file.
-
-        Returns:
-            NumaxProxies (call run() next).
-        """
+        """Create from a YAML configuration file (call run() next)."""
         return cls(load_config(yaml_path))
 
     @classmethod
     def from_psd(cls, frequency, power, settings: dict | GlobalConfig | None = None,
                  target: str = "unknown") -> "NumaxProxies":
-        """Create from a spectrum in memory; no run() needed.
-
-        Args:
-            frequency: frequency grid [muHz].
-            power: PSD.
-            settings: dict with the YAML layout, GlobalConfig, or None (defaults).
-            target: star name.
-
-        Returns:
-            NumaxProxies.
-        """
+        """Create from a spectrum in memory (no run() needed); settings use the YAML layout."""
         from .config import config_from_dict
         cfg = settings if isinstance(settings, GlobalConfig) else config_from_dict(settings or {})
         if cfg.star.target is None:
@@ -101,11 +81,7 @@ class NumaxProxies:
     # Input
     # ----------------------------------------------------------------------------------
     def run(self) -> "NumaxProxies":
-        """Load the PSD file(s), or compute the spectrum from the light curve.
-
-        Returns:
-            self.
-        """
+        """Load the PSD file(s), or compute the spectrum from the light curve."""
         if self.config.query_gaia:
             from .gaia import query_gaia
             self.gaia_data = query_gaia(self.star.target)
@@ -141,16 +117,7 @@ class NumaxProxies:
         return self
 
     def running_median(self, spectrum: PSDData, factor: float = DEFAULT_MEDIAN_FILTER_FACTOR):
-        """Running median of a spectrum over factor x envelope FWHM, computed once and reused
-        (cleaning, ACF, CoV, comb scan).
-
-        Args:
-            spectrum: PSDData (self.psd or self.avg_psd).
-            factor: window in envelope FWHM.
-
-        Returns:
-            Running median on the spectrum's frequency grid.
-        """
+        """Running median of a spectrum over factor x envelope FWHM (computed once, cached)."""
         key = (id(spectrum.psd), float(factor))
         if key not in self._medians or self._medians[key][0] is not spectrum.psd:
             self._medians[key] = (spectrum.psd,
@@ -158,15 +125,7 @@ class NumaxProxies:
         return self._medians[key][1]
 
     def relative_power(self, spectrum: PSDData, factor: float = DEFAULT_MEDIAN_FILTER_FACTOR):
-        """P / running median - 1 of a spectrum, computed once and reused (comb check, comb scan).
-
-        Args:
-            spectrum: PSDData.
-            factor: running-median window in envelope FWHM.
-
-        Returns:
-            Relative power on the spectrum's frequency grid.
-        """
+        """P / running median - 1 of a spectrum (computed once, cached)."""
         key = (id(spectrum.psd), float(factor))
         if key not in self._relative or self._relative[key][0] is not spectrum.psd:
             self._relative[key] = (spectrum.psd,
@@ -174,8 +133,7 @@ class NumaxProxies:
         return self._relative[key][1]
 
     def _comb_checker(self, spectrum: PSDData, factor: float):
-        """One PSPS comb checker per spectrum and median window, shared by ACF and CoV (its
-        cache of tested numax values is then shared too)."""
+        """One PSPS comb checker per spectrum and median window, shared by the methods."""
         from .artefacts import CombChecker
         key = (id(spectrum.psd), float(factor))
         if key not in self._checkers or self._checkers[key][0] is not spectrum.psd:
@@ -239,16 +197,7 @@ class NumaxProxies:
     # Estimates
     # ----------------------------------------------------------------------------------
     def _run_method(self, cls, cfg, label):
-        """Run one method, then plot / save as configured.
-
-        Args:
-            cls: NumaxFromACF or NumaxFromCoV.
-            cfg: its config section.
-            label: key in numax_estimates.
-
-        Returns:
-            The method object.
-        """
+        """Run one method with the configured checks (CoV scan, comb scan), then plot and save."""
         spec = self._spectrum_for_methods()
         method = cls(spec, cfg, self.config, self.star.target, self.config.initial_numax)
         if not cfg.replace_below_min_freq:
@@ -272,19 +221,20 @@ class NumaxProxies:
             method.save_numax_estimates()
         self.numax_estimates[label] = method.numax_estimate
         if self.config.cov_scan:
-            name = "ACF" if label == "numax_2DACF" else "CoV"
+            name = method.name
             acc = getattr(method, "cov_scan", {}).get("accepted")
             self.numax_estimates[f"numax_CoVscan_{name}"] = (acc["numax_cov"] if acc
                                                               else ufloat(np.nan, np.nan))
+        if self.config.comb_scan:
+            self.numax_estimates[f"numax_ACVscan_{method.name}"] = getattr(
+                method, "comb_scan", {}).get("acv_numax", ufloat(np.nan, np.nan))
         self._update_combined()
         return method
 
     COMBINED_FROM = ("numax_2DACF", "numax_CoV", "numax_CoVscan_ACF", "numax_CoVscan_CoV")
 
     def _update_combined(self):
-        """numax_estimates["numax_combined"]: the mean of the available seismic estimates (ACF,
-        CoV, and the CoV-scan centres; NaN ones left out). Uncertainty: the spread (standard
-        deviation) of those estimates, or the formal error if there is only one."""
+        """numax_combined: mean of the ACF, CoV and CoV-scan estimates; error = their spread."""
         vals = [self.numax_estimates[k] for k in self.COMBINED_FROM
                 if k in self.numax_estimates and np.isfinite(self.numax_estimates[k].n)]
         if not vals:
@@ -298,21 +248,14 @@ class NumaxProxies:
         self.numax_estimates["numax_combined"] = combined
 
     def _cov_scan(self, method, label, plot):
-        """CoV scan of the method's numax (CONFIG.cov_scan); report only.
+        """CoV scan of the method's numax (report only).
 
-        If the scan is not significant, the grid fits are repeated with one envelope FWHM around
-        the rejected numax excluded and the new estimate is scanned (cov_scan_max_refits times).
-        The refits use a copy of the grid results: the method (and the comb scan after it)
-        keeps its own fits.
-
-        Args:
-            method: computed NumaxFromACF or NumaxFromCoV.
-            label: key in numax_estimates.
-            plot: also save CovScan_<ACF|CoV>.png (the accepted scan, else the first).
+        If not significant, the scan is repeated on refitted estimates (cov_scan_max_refits); the
+        refits use a copy, so the method keeps its own fits.
         """
         import copy
         from .cov_scan import cov_scan, significant
-        cfg, name = self.config, "ACF" if label == "numax_2DACF" else "CoV"
+        cfg, name = self.config, method.name
         spec = self._spectrum_for_methods()
         rel = self.relative_power(spec)
         saved = copy.deepcopy(method.results), getattr(method, "numax_override", None)
@@ -352,20 +295,13 @@ class NumaxProxies:
             plot_cov_scan(shown, rel, spec.frequency, name, cfg, self.star.target)
 
     def _comb_scan(self, method, label, plot):
-        """Comb scan of the method's final numax (CONFIG.comb_scan).
+        """Comb scan of the method's numax; the converged centre becomes the method's numax.
 
-        The scan is re-centred on its fitted centre until it converges; the converged centre
-        becomes the method's numax. Without a significant envelope the estimate is rejected:
-        the grid fits are repeated with one envelope FWHM around it excluded and the new
-        estimate is scanned (comb_scan_max_refits times); after that the numax is NaN.
-
-        Args:
-            method: computed NumaxFromACF or NumaxFromCoV.
-            label: key in numax_estimates.
-            plot: also save CombScan_<ACF|CoV>.png.
+        A numax without a significant comb is rejected and the method refitted without it
+        (comb_scan_max_refits); after that the numax is NaN. Also runs the ACV check on the same scans.
         """
         from .comb_scan import recentre
-        cfg, name = self.config, "ACF" if label == "numax_2DACF" else "CoV"
+        cfg, name = self.config, method.name
         spec = self._spectrum_for_methods()
         rel = self.relative_power(spec)
         original = method.numax_estimate.n
@@ -392,8 +328,19 @@ class NumaxProxies:
             accepted["numax_raw"] = raw
             method.numax_override = ufloat(
                 correct_numax(spec.frequency, self.running_median(spec), raw.n), raw.s)
+        # ACV check (report only): the ACV profile of the last scan of each attempt, in order
+        # (the method's estimate, then the refits); the first significant one is kept
+        from .comb_scan import acv_significant
+        acv = next((a["scans"][-1] for a in attempts if a["scans"]
+                    and acv_significant(a["scans"][-1], cfg.comb_scan_acv_threshold)), None)
+        acv_numax = acv["acv"]["centre"] if acv else ufloat(np.nan, np.nan)
+        if acv and cfg.background_correction:            # like the comb centre
+            from .background import correct_numax
+            acv_numax = ufloat(correct_numax(spec.frequency, self.running_median(spec),
+                                             acv_numax.n), acv_numax.s)
         method.comb_scan = dict(original=original, rejected=rejected, attempts=attempts,
-                                accepted=accepted, final=method.numax_override)
+                                accepted=accepted, final=method.numax_override, acv=acv,
+                                acv_numax=acv_numax)
         self.comb_scan_results[name] = method.comb_scan
         if accepted:
             last = accepted["scans"][-1]
@@ -411,17 +358,22 @@ class NumaxProxies:
                                self.star.target)
 
     def compute_numax_from_acf(self):
-        """Run the ACF method; result in numax_estimates['numax_2DACF'] and self.acf."""
+        """Run the ACF method (numax_2DACF, self.acf)."""
         self.acf = self._run_method(NumaxFromACF, self.acf_config, "numax_2DACF")
         return self.numax_estimates["numax_2DACF"]
 
+    def compute_numax_from_acv(self):
+        """Run the ACV method with the ACF_CONFIG settings (numax_ACV, self.acv; not in numax_combined)."""
+        self.acv = self._run_method(NumaxFromACV, self.acf_config, "numax_ACV")
+        return self.numax_estimates["numax_ACV"]
+
     def compute_numax_from_CoV(self):
-        """Run the CoV method; result in numax_estimates['numax_CoV'] and self.cov."""
+        """Run the CoV method (numax_CoV, self.cov)."""
         self.cov = self._run_method(NumaxFromCoV, self.cov_config, "numax_CoV")
         return self.numax_estimates["numax_CoV"]
 
     def compute_numax_from_scaling_relations(self):
-        """numax from scaling relations with Gaia (query_gaia) and/or STAR parameters."""
+        """numax from scaling relations with Gaia and/or STAR parameters."""
         estimates = numax_from_scaling_relations(self.star, self.gaia_data)
         if not estimates:
             logger.warning("%s: no stellar parameters for the scaling relations", self.star.target)
@@ -440,18 +392,11 @@ class NumaxProxies:
             self.psps_delta_nu(plot=True)
 
     def psps_delta_nu(self, plot: bool = False) -> dict:
-        """Delta-nu from the PSPS around the ACF and CoV numax (strongest peak near
-        1/Delta-nu or 2/Delta-nu).
-
-        Args:
-            plot: also save PSPS.png.
-
-        Returns:
-            {"dnu_ACF": muHz, "dnu_CoV": muHz} for the methods that were run and have a numax.
-        """
+        """Delta-nu from the PSPS around each method's numax: {"dnu_<method>": muHz}."""
         from .artefacts import psps
         cfg, curves = self.config, []
         for label, colour, method, offset in (("ACF", "forestgreen", getattr(self, "acf", None), 0.0),
+                                              ("ACV", "dodgerblue", getattr(self, "acv", None), 0.0),
                                               ("CoV", "mediumorchid", getattr(self, "cov", None), 1.0)):
             if method is None:
                 continue
@@ -469,11 +414,7 @@ class NumaxProxies:
 
     @property
     def results(self) -> pd.DataFrame:
-        """All estimates (saved as csv if CONFIG.save_results).
-
-        Returns:
-            DataFrame with columns label, numax, numax_err.
-        """
+        """All estimates as a DataFrame (label, numax, numax_err); saved if CONFIG.save_results."""
         df = pd.DataFrame([{"label": k, "numax": getattr(v, "n", v),
                             "numax_err": getattr(v, "s", np.nan)}
                            for k, v in self.numax_estimates.items()])
@@ -490,14 +431,7 @@ class NumaxProxies:
 
     @property
     def cov_scan_table(self) -> pd.DataFrame:
-        """CoV scan per method (CONFIG.cov_scan).
-
-        Returns:
-            DataFrame: method, numax_original (the method's estimate), rejected (estimates without
-            a significant excess), start (estimate of the accepted scan), shifted (power-excess
-            peak), numax_cov (fitted centre), numax_cov_err, peak_z, significant, n (points per
-            window); for a rejected star the values of the first scan.
-        """
+        """CoV scan per method: original and rejected numax, shifted numax, CoV centre, peak z, significant."""
         rows = []
         for k, c in self.cov_scan_results.items():
             a = c["accepted"] or (c["attempts"][0] if c["attempts"] else None)
@@ -511,16 +445,22 @@ class NumaxProxies:
                          "significant": c["accepted"] is not None, "n": a["n"] if a else np.nan})
         return pd.DataFrame(rows)
 
+    @staticmethod
+    def _acv_columns(c) -> dict:
+        """ACV-check columns of the comb-scan table for one method."""
+        s = c.get("acv") or next((a["scans"][-1] for a in c["attempts"] if a["scans"]), None)
+        acv = s["acv"] if s else None
+        return {"acv_numax": c["acv_numax"].n,
+                "acv_centre": acv["centre"].n if acv else np.nan,
+                "acv_numax_err": acv["centre"].s if acv else np.nan,
+                "acv_peak_z": acv["peak_z"] if acv else np.nan,
+                "acv_significant": c.get("acv") is not None}
+
     @property
     def comb_scan_table(self) -> pd.DataFrame:
-        """Comb scan per method (CONFIG.comb_scan).
-
-        Returns:
-            DataFrame: method, numax_original (before the comb scan), rejected (numax values
-            without a significant envelope), start (numax the accepted scan started from),
-            numax (final, background-corrected if CONFIG.background_correction), numax_comb
-            (comb-scan centre), numax_err, status, n_scans, peak_z (last scan, integer profile;
-            peak_z_half, _combined, _anti, _total: the diagnostic profiles), D [muHz].
+        """Comb scan per method: original and rejected numax, final numax, comb centre, status, peak z
+        per profile, D, and the ACV check (acv_numax (background-corrected), acv_centre, acv_peak_z,
+        acv_significant).
         """
         rows = []
         for k, c in self.comb_scan_results.items():
@@ -539,5 +479,6 @@ class NumaxProxies:
                          "peak_z_combined": last["profiles"]["combined"]["peak_z"] if a else np.nan,
                          "peak_z_anti": last["profiles"]["anti"]["peak_z"] if a else np.nan,
                          "peak_z_total": last["profiles"]["total"]["peak_z"] if a else np.nan,
-                         "D": last["D"] if a else np.nan})
+                         "D": last["D"] if a else np.nan,
+                         **self._acv_columns(c)})
         return pd.DataFrame(rows)

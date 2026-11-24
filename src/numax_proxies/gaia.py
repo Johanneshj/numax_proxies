@@ -16,16 +16,7 @@ FIELD = {"radius_flame": "rad_flame", "radius_gspphot": "rad_gspphot"}
 
 
 def query_simbad_gaia_id(name: str, retries: int = 3, delay: float = 1.5):
-    """Latest Gaia identifier of an object in SIMBAD.
-
-    Args:
-        name: object name, e.g. "KIC 1872517".
-        retries: number of attempts.
-        delay: seconds between attempts.
-
-    Returns:
-        e.g. "Gaia DR3 1234..." or None.
-    """
+    """Latest Gaia identifier of an object in SIMBAD, or None."""
     from astroquery.simbad import Simbad
 
     for attempt in range(retries):
@@ -65,14 +56,7 @@ def _error(val, lower, upper):
 
 
 def query_gaia(target: str) -> GaiaData:
-    """Gaia DR3 Teff, logg, mass, luminosity and radius of a target.
-
-    Args:
-        target: object name.
-
-    Returns:
-        GaiaData (empty if the query fails).
-    """
+    """Gaia DR3 Teff, logg, mass, luminosity and radius of a target (empty GaiaData if it fails)."""
     from astroquery.gaia import Gaia
 
     gaia_id = query_simbad_gaia_id(target)

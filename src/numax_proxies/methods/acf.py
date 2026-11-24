@@ -1,19 +1,11 @@
-"""numax from the collapsed 2D autocorrelation function (Huber+2009, Viani+2019).
+"""ACF method: numax from the collapsed 2D autocorrelation function (Huber+2009, Viani+2019).
 
-Steps, for every (overlap_scale, width_factor) on the grid:
-  1. relative power  (P - median) / median, with a running median over
-     median_filter_factor x envelope FWHM
-  2. bins of width_factor x Delta-nu(nu), overlap_scale bins per bin width
-  3. per bin, autocorrelation r(k) = ACF(k) / ACF(0) of the centred relative power
-     (regularity within the bin, not its variance), collapsed to one number
-     (ACF_CONFIG.collapse) minus its white-noise mean:
-       all_lags : mean |r(k)| over all lags 1..n-1 (MCC) - mu0(n)   (mu0 from simulations)
-       delta_nu : mean r(k) over the lags within +-dnu_window of m x Delta-nu(bin centre),
-                  m in dnu_multiples, - its analytic white-noise mean
-  4. smoothing over smoothing_factor x envelope FWHM (one curve per smoothing factor)
-  5. significance: raw CACF compared with a per-bin FAP threshold
-  6. Gaussian fit to the smoothed CACF -> numax
+For every grid setting: bin the relative power (width w x Delta-nu), collapse each bin's ACF to
+one number minus its white-noise mean (ACF_CONFIG.collapse: all_lags, delta_nu, or
+autocovariance for the ACV method), smooth, test against the per-bin threshold and fit a
+Gaussian. numax = median over the grid.
 """
+import dataclasses
 import logging
 import time
 from pathlib import Path
@@ -42,17 +34,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------------------
 @njit(cache=True, parallel=True)
 def cacf_in_windows(power, idx_start, idx_end):
-    """Mean absolute autocorrelation (MCC) of every bin.
-
-    Statistic: mean_{k=1..n-1} |r(k)|, r(k) = ACF(k) / ACF(0) of the centred power.
-
-    Args:
-        power: relative power.
-        idx_start, idx_end: bin i covers power[idx_start[i]:idx_end[i]].
-
-    Returns:
-        MCC per bin (NaN for bins with < 2 points or zero variance).
-    """
+    """Mean |r(k)| over all lags (MCC) of every bin; NaN for empty or constant bins."""
     n_windows = len(idx_start)
     results = np.full(n_windows, np.nan)
     for i in prange(n_windows):
@@ -72,22 +54,27 @@ def cacf_in_windows(power, idx_start, idx_end):
 
 
 @njit(cache=True, parallel=True)
+def acv_in_windows(power, idx_start, idx_end):
+    """Mean |ACF(k)| / n over all lags of every bin (the ACV method: not divided by ACF(0))."""
+    n_windows = len(idx_start)
+    results = np.full(n_windows, np.nan)
+    for i in prange(n_windows):
+        start, end = idx_start[i], idx_end[i]
+        n = end - start
+        if n < 2:
+            continue
+        x = power[start:end]
+        x_centered = x - np.mean(x)
+        nfft = scipy.fft.next_fast_len(2 * n - 1)
+        spectrum = scipy.fft.rfft(x_centered, n=nfft, workers=1)
+        corr = scipy.fft.irfft(spectrum * np.conjugate(spectrum), n=nfft, workers=1)
+        results[i] = np.mean(np.abs(corr[1:n])) / n
+    return results
+
+
+@njit(cache=True, parallel=True)
 def cacf_delta_nu_in_windows(power, idx_start, idx_end, k_lo, k_hi):
-    """Collapsed ACF ('delta_nu') of every bin and its white-noise mean and sd.
-
-    Statistic: mean over the bands m of the band mean of r(k) = ACF(k) / ACF(0) over
-    k_lo[i, m] <= k <= k_hi[i, m]; every band that fits in the bin has equal weight.
-    White noise: E r(k) = -(n-k)/n^2, Var r(k) = (n-k)/n^2, lags conditioned on the sum
-    rule sum_{k>=1} r(k) = -1/2 (Var S = sum a_k^2 Var r_k - mean^2 2n/(n-1)).
-
-    Args:
-        power: relative power.
-        idx_start, idx_end: bin i covers power[idx_start[i]:idx_end[i]].
-        k_lo, k_hi: (n_bins, n_bands) lag ranges in frequency points (not overlapping).
-
-    Returns:
-        (statistic, null_mean, null_sd) per bin; NaN where no band fits in the bin.
-    """
+    """Mean r(k) in the lag bands of every bin, with its white-noise mean and sd: (stat, mean, sd)."""
     n_windows = len(idx_start)
     stat = np.full(n_windows, np.nan)
     null_mean = np.full(n_windows, np.nan)
@@ -131,16 +118,7 @@ def cacf_delta_nu_in_windows(power, idx_start, idx_end, k_lo, k_hi):
 
 
 def band_edges(multiples, window, mode="relative"):
-    """Lower and upper edge of every lag band, in units of Delta-nu(bin centre).
-
-    Args:
-        multiples: multiples m of Delta-nu.
-        window: half-width; fraction of m x Delta-nu ("relative") or of Delta-nu ("fixed").
-        mode: "relative" -> (1 -+ window) m; "fixed" -> m -+ window.
-
-    Returns:
-        (lo, hi) arrays, sorted by m, before trimming of overlaps.
-    """
+    """Edges of the lag bands in units of Delta-nu: (lo, hi), before trimming of overlaps."""
     m = np.sort(np.asarray(multiples, dtype=float))
     if mode == "fixed":
         return m - window, m + window
@@ -148,20 +126,7 @@ def band_edges(multiples, window, mode="relative"):
 
 
 def delta_nu_lag_ranges(centres, frequency, window, multiples, mode="relative"):
-    """Lag bands around m x Delta-nu(bin centre), in frequency points.
-
-    Bands that would overlap are trimmed so that no lag is in two bands.
-
-    Args:
-        centres: bin centres [muHz].
-        frequency: frequency grid [muHz] (uniform).
-        window: half-width; fraction of m x Delta-nu ("relative") or of Delta-nu ("fixed").
-        multiples: multiples m of Delta-nu.
-        mode: "relative" or "fixed" (see band_edges).
-
-    Returns:
-        (k_lo, k_hi), each (n_bins, n_bands).
-    """
+    """Lag bands around m x Delta-nu(bin centre) in points, trimmed so they do not overlap: (k_lo, k_hi)."""
     df = frequency[1] - frequency[0]
     lo, hi = band_edges(multiples, window, mode)
     dnu = delta_nu(centres)[:, None]
@@ -172,20 +137,8 @@ def delta_nu_lag_ranges(centres, frequency, window, multiples, mode="relative"):
 
 
 def acf_map(frequency, rel_power, centres, idx_start, idx_end, n_lag: int = 300,
-            lag_unit: str = "dnu"):
-    """2D ACF of every bin for plotting.
-
-    Args:
-        frequency: frequency grid [muHz].
-        rel_power: relative power.
-        centres, idx_start, idx_end: bins (see log_numax_bins).
-        n_lag: points on the lag axis.
-        lag_unit: "dnu" (lag / Delta-nu(bin centre)) or "muHz" (linear frequency lag).
-
-    Returns:
-        (lag grid in lag_unit, r(k) / white-noise sd [n_lag, n_bins]); NaN where a bin
-        has no such lag.
-    """
+            lag_unit: str = "dnu", normalise: bool = True):
+    """2D ACF of every bin for plotting: r(k) / white-noise sd, or ACF(k) / n with normalise=False. Returns (lags, map)."""
     df = frequency[1] - frequency[0]
     dnu = delta_nu(centres) if lag_unit == "dnu" else np.ones(len(centres))
     widths = (idx_end - idx_start) * df / dnu
@@ -201,7 +154,7 @@ def acf_map(frequency, rel_power, centres, idx_start, idx_end, n_lag: int = 300,
         if not corr[0] > 0:
             continue
         k = np.arange(n)
-        z = corr / corr[0] * n / np.sqrt(np.maximum(n - k, 1))
+        z = corr / corr[0] * n / np.sqrt(np.maximum(n - k, 1)) if normalise else corr / n
         kk = grid * dnu[i] / df
         ok = (kk >= 1) & (kk <= n - 1)
         out[ok, i] = np.interp(kk[ok], k, z)
@@ -209,19 +162,7 @@ def acf_map(frequency, rel_power, centres, idx_start, idx_end, n_lag: int = 300,
 
 
 def relative_power(frequency, power, cfg, seed, med=None):
-    """Relative power (P - median) / median.
-
-    Args:
-        frequency: frequency grid [muHz].
-        power: PSD.
-        cfg: ACFConfig (min_freq, replace_below_min_freq, median_filter_factor).
-        seed: random seed for the white-noise replacement.
-        med: running median of power with cfg.median_filter_factor (not used
-            with replace_below_min_freq); None = computed here.
-
-    Returns:
-        (relative power, running median).
-    """
+    """Relative power (P - median) / median and the running median."""
     if cfg.replace_below_min_freq:
         power = replace_below_min_freq(frequency, power, cfg.min_freq, seed)
     if med is None or cfg.replace_below_min_freq:
@@ -230,18 +171,7 @@ def relative_power(frequency, power, cfg, seed, med=None):
 
 
 def calculate_cacf(frequency, rel_power, cfg) -> dict:
-    """Raw and smoothed CACF for every grid setting.
-
-    Args:
-        frequency: frequency grid [muHz].
-        rel_power: relative power.
-        cfg: ACFConfig.
-
-    Returns:
-        {(overlap_scale, width_factor, smoothing_factor): {bin_centers, N_data_points_in_bin,
-        cacf_raw, cacf_smoothed, noise_mean[, null_sd]}}; cacf_raw is the collapsed
-        autocorrelation minus its white-noise mean (noise_mean).
-    """
+    """Raw and smoothed collapsed statistic for every grid setting."""
     t0 = time.perf_counter()
     frequency = np.ascontiguousarray(frequency)
     rel_power = np.ascontiguousarray(rel_power)
@@ -253,6 +183,10 @@ def calculate_cacf(frequency, rel_power, cfg) -> dict:
             if cfg.collapse == "all_lags":
                 noise_mean = acf_noise_mean(i1 - i0)
                 raw = cacf_in_windows(rel_power, i0, i1) - noise_mean
+                extra = {"noise_mean": noise_mean}
+            elif cfg.collapse == "autocovariance":
+                noise_mean = acf_noise_mean(i1 - i0, "ACV")
+                raw = acv_in_windows(rel_power, i0, i1) - noise_mean
                 extra = {"noise_mean": noise_mean}
             else:
                 k_lo, k_hi = delta_nu_lag_ranges(centres, frequency, cfg.dnu_window,
@@ -277,22 +211,11 @@ def calculate_cacf(frequency, rel_power, cfg) -> dict:
 # --------------------------------------------------------------------------------------
 def fit_cacf(raw, smoothed, centres, fap, initial_numax, max_iterations, n_sigma, min_freq,
              at_numax=False):
-    """Gaussian (with offset) fit to the smoothed CACF.
+    """Gaussian fit to the smoothed curve of one grid setting.
 
-    Args:
-        raw: raw CACF per bin (used for the significance test).
-        smoothed: smoothed CACF per bin (fitted).
-        centres: bin centres [muHz].
-        fap: threshold per bin (or scalar); at least one raw bin must reach it.
-        initial_numax: starting guess [muHz] or None (= highest smoothed bin).
-        max_iterations: successive fits, each after removing the previous peak; the fit
-            with the largest integral within n_sigma is kept.
-        n_sigma: half-width of the integral window in fitted sigma.
-        min_freq: lower bound for the fitted centre [muHz].
-        at_numax: also require a significant bin within one envelope FWHM of the fit.
-
-    Returns:
-        (ufloat(numax, formal error), [amp, sigma, centre, offset]); NaN if no fit.
+    Needs at least one raw bin above the threshold (near the fit with at_numax). With
+    max_iterations > 1 the peak is removed and refitted; the fit with the largest integral is
+    kept. Returns (ufloat numax, [amp, sigma, centre, offset]), NaN if no fit.
     """
     nan_result = ufloat(np.nan, np.nan), np.full(4, np.nan)
     x = np.asarray(centres, dtype=float)
@@ -350,17 +273,8 @@ MAX_COMB_RETRIES = 3          # refits after a fit fails the comb check
 def fit_all(results, initial_numax, cfg, comb_checker=None, exclude=()) -> dict:
     """Fit every grid setting (in place).
 
-    Args:
-        results: output of calculate_cacf with "fap" added.
-        initial_numax: starting guess [muHz] or None.
-        cfg: ACFConfig.
-        comb_checker: callable numax -> bool (artefacts.CombChecker) or None. A fit that fails
-            it is repeated with one envelope FWHM around it excluded (MAX_COMB_RETRIES times).
-        exclude: numax values [muHz]; bins within one envelope FWHM of each are left out of
-            every fit (comb scan rejections; the starting guess is then not used).
-
-    Returns:
-        results, with fit_numax (ufloat), fit_params and comb_rejected per setting.
+    A fit that fails the comb check is redone without that region; bins near the values in
+    exclude are left out (comb-scan rejections).
     """
     def fit(raw, smoothed, guess):
         return fit_cacf(raw, smoothed, data["bin_centers"], data["fap"], guess,
@@ -402,13 +316,7 @@ class NumaxFromACF:
     info_folder = "ACF_info"
 
     def __init__(self, psd, acf_config, config, target="unknown", initial_numax=None):
-        """Args:
-            psd: PSDData.
-            acf_config: ACFConfig.
-            config: ProcessingConfig.
-            target: star name (output folder).
-            initial_numax: starting guess for the fits [muHz] or None.
-        """
+        """Set up the method; the pipeline fills in median, comb_checker and background_median."""
         self.frequency = psd.frequency
         self.power = psd.psd
         self.cfg = acf_config
@@ -421,18 +329,14 @@ class NumaxFromACF:
         self.background_median = None        # set -> background-corrected numax per fit
 
     def compute(self):
-        """Relative power, CACF, thresholds and fits for every grid setting.
-
-        Returns:
-            self (results in self.results).
-        """
+        """Relative power, collapsed statistic, thresholds and fits for every grid setting."""
         t0 = time.perf_counter()
         with numba_threads(self.config.n_threads):
             self.normalized_power, self.med_filter = relative_power(
                 self.frequency, self.power, self.cfg, self.config.random_seed,
                 self.median)
             results = calculate_cacf(self.frequency, self.normalized_power, self.cfg)
-        results = add_faps(results, "ACF", self.cfg)
+        results = add_faps(results, self.name, self.cfg)
         checker = self.comb_checker if self.comb_check_mode else None
         if self.comb_check_mode and checker is None:
             from ..artefacts import CombChecker
@@ -443,18 +347,11 @@ class NumaxFromACF:
         self._checker = checker
         self.results = fit_all(results, self.initial_numax, self.cfg, checker)
         self._correct_background()
-        logger.info("%s: ACF done in %.1f s", self.id, time.perf_counter() - t0)
+        logger.info("%s: %s done in %.1f s", self.id, self.name, time.perf_counter() - t0)
         return self
 
     def refit(self, exclude):
-        """Repeat the fits with bins within one envelope FWHM of each value in exclude left out.
-
-        Args:
-            exclude: numax values [muHz].
-
-        Returns:
-            self.
-        """
+        """Repeat the fits without the bins near the numax values in exclude."""
         self.results = fit_all(self.results, self.initial_numax, self.cfg, self._checker,
                                list(exclude))
         self._correct_background()
@@ -467,25 +364,35 @@ class NumaxFromACF:
 
     @property
     def numax_estimate(self):
-        """Median numax and median formal error over the grid (ufloat), or the comb-scan
-        numax if the comb scan set one (numax_override)."""
+        """Median numax over the grid, or the comb-scan numax if one was set."""
         if getattr(self, "numax_override", None) is not None:
             return self.numax_override
         return median_estimate(self.results)
 
     def _dir(self) -> Path:
-        """Output folder <results_directory>/<target>/ACF_info."""
+        """Output folder <results_directory>/<target>/<info_folder>."""
         return Path(self.config.results_directory) / str(self.id) / self.info_folder
 
     def save_all_data(self):
-        """Save all results as ACF_info/all_data.pkl.gz."""
+        """Save all results as all_data.pkl.gz."""
         save_pickle(self.results, self._dir() / "all_data.pkl.gz")
 
     def save_numax_estimates(self):
-        """Save numax per grid setting as ACF_info/numax_estimates.txt."""
+        """Save numax per grid setting as numax_estimates.txt."""
         save_numax_estimates(self.results, self._dir() / "numax_estimates.txt")
 
     def plot(self):
-        """Save ACF.png (spectrum, optional 2D ACF, CACF curves and fits)."""
+        """Save <name>.png (spectrum, optional 2D ACF, curves and fits)."""
         from ..plotting import plot_acf
         plot_acf(self)
+
+
+class NumaxFromACV(NumaxFromACF):
+    """The ACV method: the ACF method with the autocovariance collapse (ACF not divided by ACF(0))."""
+
+    name = "ACV"
+    info_folder = "ACV_info"
+
+    def __init__(self, psd, acf_config, config, target="unknown", initial_numax=None):
+        super().__init__(psd, dataclasses.replace(acf_config, collapse="autocovariance"),
+                         config, target, initial_numax)

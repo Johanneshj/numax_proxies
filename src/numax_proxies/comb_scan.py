@@ -1,35 +1,15 @@
-"""Comb scan: a sanity check of a fitted numax from a local 2D ACF with constant windows.
+"""Comb scan: checks that a fitted numax sits on a regular comb of modes, and re-centres it.
 
-Around the tested numax (Dnu_s = Delta-nu(numax) from the scaling relation, FWHM = envelope
-FWHM):
-  1. windows of constant width `width` x Dnu_s, centres every Dnu_s / 4 over numax +- `span` FWHM
-  2. per window: relative power minus a straight line, linear ACF r(k) = ACF(k) / ACF(0)
-  3. collapse onto lag bands m D +- 0.1 D, as the weighted mean of the band means
-     (weight +1: correlation expected, -1: anticorrelation expected, sign flipped), profiles:
-       integer      m = 1, 2                          modes repeating every Dnu (l = 0, 2; p-like l = 1)
-       half         m = 1/2, 3/2                      l = 1 halfway between the radial modes
-       combined     m = 1/2, 1, 3/2, 2
-       anti         m = 1/4, 3/4, 5/4, 7/4, 9/4  (-1)  the dips between the peaks, sign flipped
-       total        combined (+1) and anti (-1)
-     z = (c - null mean) / null sd. White-noise null: analytic for a mean-removed window,
-     corrected for the line removal with comb_scan_null.json (scripts/make_comb_scan_null.py)
-  4. Aim: the scan is first re-centred on the power excess (maximum of P / median smoothed
-     over one envelope FWHM within numax +- span FWHM): windows, Dnu_s and lag units follow
-     that frequency. D* = the trial D in [0.7, 1.3] Dnu_s with the largest z of the band at
-     lag D alone, averaged over the windows within +- 1 FWHM of the scan centre.
-  5. Gaussian (with offset) fit to each profile at D*. The INTEGER profile decides (accept,
-     re-centre, numax): it survives mixed dipole modes (subgiants), whose l = 1 modes are off
-     the half-way positions. The other profiles are diagnostics. Note: the dips sit at the
-     quarter positions only when l = 1 lies halfway; a broad negative feature (dip, artefact)
-     is anticorrelated at all moderate lags and makes "anti" positive too.
+Around the (power-excess-shifted) numax, the relative power is cut into windows of constant
+width. Each window's ACF is collapsed onto lag bands at multiples of the spacing D (the
+"integer" profile at D and 2D decides; the half, combined, anti and total profiles are
+diagnostics), converted to z against white noise (analytic, corrected with
+comb_scan_null.json) and fitted with a Gaussian. recentre() repeats the scan on the fitted
+centre until it converges, or rejects the numax if the peak z is below the threshold.
 
-A real comb gives a positive Gaussian; the fitted centre lands on the envelope even when the
-tested numax is off (as long as the envelope is inside the scan). Artefacts and humps give
-no positive peak (a broad excess or dip anticorrelates at these lags).
-
-recentre(): repeat the scan around the fitted centre (new Dnu_s from the scaling relation)
-until the centre moves by less than `tolerance` x FWHM; the envelope is significant if the
-fitted Gaussian is positive with peak z >= `threshold`.
+The ACV check uses the same windows and bands, but on the autocovariance (the ACF not divided
+by the window's own variance): it also responds to power, so it survives a few dominant modes,
+but also to tall spikes.
 """
 import json
 from functools import lru_cache
@@ -45,6 +25,7 @@ from .fitting import FWHM_TO_SIGMA, gaussian, gaussian_jac
 from .seismic import delta_nu, envelope_fwhm
 
 STEP = 0.25            # window step [Dnu_s]
+NOISE_VAR = 1.0 / np.log(2.0) ** 2   # variance of P / median for chi^2_2 white noise
 HALF = 0.1             # band half-width [D]
 D_RANGE = (0.7, 1.3)   # trial spacings [Dnu_s]
 _PEAKS = (0.5, 1.0, 1.5, 2.0)
@@ -61,7 +42,7 @@ MIN_WIDTH = (max(m for bands in PROFILES.values() for m, _ in bands) + HALF) * D
 
 
 def profile_bands(d_pts, name, hw=HALF):
-    """(lo, hi, weights) of a profile for trial spacings d_pts [points], band half-width hw [D]."""
+    """Lag bands (lo, hi) and weights of a profile for the trial spacings d_pts [points]."""
     mult = [m for m, _ in PROFILES[name]]
     lo, hi = band_edges(d_pts, mult, hw)
     return lo, hi, np.array([w for _, w in PROFILES[name]])
@@ -72,33 +53,33 @@ N_LAG_MAP = 200        # lag points of the 2D ACF map
 
 
 def relative_power(frequency, power):
-    """P / running median - 1 (default running-median window)."""
+    """P / running median - 1."""
     return power / running_median(frequency, power) - 1.0
 
 
-def _autocorr(x):
-    """Linear (zero-padded) autocorrelation r(k) = ACF(k) / ACF(0) of x minus a straight line."""
+def _autocov(x):
+    """ACF of x after removing a straight line: (r(k) = ACF(k) / ACF(0), variance per point)."""
     t = np.arange(x.size) - 0.5 * (x.size - 1)          # centred index: slope and mean decouple
     x = x - x.mean() - t * (np.dot(t, x) / np.dot(t, t))
     nfft = 1 << int(np.ceil(np.log2(2 * x.size)))
     c = np.fft.irfft(np.abs(np.fft.rfft(x, nfft)) ** 2, nfft)[:x.size]
-    return c / c[0]
+    return c / c[0], c[0] / x.size
+
+
+def _autocorr(x):
+    """r(k) = ACF(k) / ACF(0) of x after removing a straight line."""
+    return _autocov(x)[0]
 
 
 def band_edges(d_pts, multiples, hw=HALF):
-    """Lag bands m D +- hw D in points: (lo, hi), each (n_bands, n_D); at least one lag each."""
+    """Lag bands m D +- hw D in points, (lo, hi) of shape (n_bands, n_D)."""
     lo = np.array([np.ceil((m - hw) * d_pts) for m in multiples]).astype(int)
     hi = np.array([np.floor((m + hw) * d_pts) for m in multiples]).astype(int)
     return lo, np.maximum(hi, lo)
 
 
 def excess_peak(frequency, rel_power, numax, span):
-    """Frequency of the maximum of P / median smoothed over one envelope FWHM (running mean),
-    within numax +- span x FWHM: where the power excess is.
-
-    Returns:
-        Frequency [muHz], or NaN if the range holds too few points.
-    """
+    """Frequency of the maximum of the smoothed P / median within numax +- span FWHM (NaN if too few points)."""
     fwhm = float(envelope_fwhm(numax))
     df = frequency[1] - frequency[0]
     k = max(1, int(round(fwhm / df)))
@@ -116,8 +97,7 @@ def excess_peak(frequency, rel_power, numax, span):
 
 
 def _collapse(r, lo, hi, w=None):
-    """c(D) for every trial D: weighted mean of the band means (lo, hi: (n_bands, n_D) lag
-    indices; w: weight per band, default +1)."""
+    """Weighted mean of the band means of r for every trial D."""
     w = np.ones(len(lo)) if w is None else w
     cs = np.concatenate([[0.0], np.cumsum(r)])
     return sum(w[b] * (cs[hi[b] + 1] - cs[lo[b]]) / (hi[b] - lo[b] + 1)
@@ -126,7 +106,7 @@ def _collapse(r, lo, hi, w=None):
 
 @lru_cache(maxsize=1)
 def _null_tables():
-    """{profile: (bias, sd ratio interpolators over (log10 n, D / n, half-width), axes)}."""
+    """Interpolators of the line-removal correction (comb_scan_null.json), per profile."""
     t = json.loads(resources.files("numax_proxies").joinpath("comb_scan_null.json").read_text())
     axes = (np.log10(t["n"]), np.asarray(t["x"]), np.asarray(t["half_width"]))
     return {name: (RegularGridInterpolator(axes, np.asarray(v["bias"])),
@@ -135,22 +115,7 @@ def _null_tables():
 
 
 def null_mean_sd(n, d_pts, lo, hi, profile=DECIDES, w=None, hw=HALF):
-    """White-noise mean and sd of c(D) for a line-removed window of n points.
-
-    Analytic for a mean-removed window (E r(k) = -(n-k)/n^2, Var r(k) = (n-k)/n^2, lags
-    conditioned on the sum rule), corrected with the simulated table comb_scan_null.json.
-
-    Args:
-        n: window length [points].
-        d_pts: trial spacings D [points].
-        lo, hi: (n_bands, n_D) lag bands (band_edges).
-        profile: name in PROFILES (selects the line-removal correction).
-        w: weight per band (default: the profile's weights).
-        hw: band half-width [D] (selects the line-removal correction).
-
-    Returns:
-        (mean, sd) per trial D.
-    """
+    """White-noise mean and sd of a profile for windows of n points, per trial D."""
     k = np.arange(n)
     cs = np.concatenate([[0.0], np.cumsum((n - k) / n ** 2)])
     nb = len(lo)
@@ -172,14 +137,7 @@ def null_mean_sd(n, d_pts, lo, hi, profile=DECIDES, w=None, hw=HALF):
 
 
 def _fit(centres, z, numax, fwhm):
-    """Gaussian (with offset) fit to the profile, amplitude >= 0 (a comb envelope is a peak).
-
-    Started at the profile maximum (running mean over 5 windows) and at the tested numax; the
-    fit with the smaller squared residual is kept.
-
-    Returns:
-        (popt, pcov), or (None, None) if no fit succeeds or the centre is at the edge.
-    """
+    """Gaussian fit (amplitude >= 0) to a z profile; (popt, pcov), or (None, None) if it fails."""
     lo, hi = centres.min(), centres.max()
     sig = fwhm / FWHM_TO_SIGMA
     smooth = np.convolve(z, np.ones(5) / 5, mode="same")
@@ -202,23 +160,11 @@ def _fit(centres, z, numax, fwhm):
 
 
 def comb_scan(frequency, rel_power, numax, width=4.0, span=2.0, with_map=True, aim_at="excess"):
-    """Comb scan around numax.
+    """One comb scan around numax.
 
-    Args:
-        frequency: uniform frequency grid [muHz].
-        rel_power: relative power P / running median - 1 (see relative_power).
-        numax: guess numax [muHz] (the ACF / CoV estimate).
-        width: window width [Delta-nu]; at least MIN_WIDTH (the 9/4 D band must fit).
-        span: scan range +- span x envelope FWHM.
-        with_map: also return the local 2D ACF (r / sd(r) per lag and window) for plotting.
-        aim_at: "excess" (default): the scan is re-centred on the power-excess peak within
-            numax +- span FWHM (the shifted numax); "numax": centred on the guess (test option).
-
-    Returns:
-        dict (centres, z, lag, map, dnu, D, fwhm, numax (the guess), scan_centre (the shifted
-        numax), width, popt, numax_comb (ufloat; NaN if no fit), peak_z, offset = numax_comb /
-        numax - 1) for the deciding (integer) profile, and profiles = {name: dict(z, popt, cov,
-        peak_z, centre)} for every profile; None if no window fits.
+    Returns a dict with the windows (centres), the deciding profile (z, popt, numax_comb, peak_z),
+    all profiles, the ACV check (acv), the shifted numax (scan_centre) and, with with_map, the
+    local 2D ACF for plotting; None if the scan does not fit in the spectrum.
     """
     frequency = np.asarray(frequency, dtype=float)
     rel_power = np.asarray(rel_power, dtype=float)
@@ -247,7 +193,9 @@ def comb_scan(frequency, rel_power, numax, width=4.0, span=2.0, with_map=True, a
     if not near.any():
         near = np.ones(centres.size, dtype=bool)
 
-    R = [_autocorr(rel_power[a:a + n]) for a in starts]
+    RV = [_autocov(rel_power[a:a + n]) for a in starts]
+    R = [r for r, _ in RV]
+    var = np.array([v for _, v in RV]) / (NOISE_VAR * (n - 2) / n)   # 1 for white noise
     k = np.arange(n)
     norm = n / np.sqrt(np.maximum(n - k, 1))                 # r -> r / sd(r) for white noise
 
@@ -257,15 +205,19 @@ def comb_scan(frequency, rel_power, numax, width=4.0, span=2.0, with_map=True, a
     za = np.array([(_collapse(r, lo, hi) - mu0) / sd0 for r in R])
     j = int(np.argmax(za[near].mean(axis=0)))
 
+    def fitted(z):
+        p, cov = _fit(centres, z, numax, fwhm)
+        return dict(z=z, popt=p, cov=cov, peak_z=np.nan if p is None else float(p[0] + p[3]),
+                    centre=ufloat(p[2], np.sqrt(cov[2, 2])) if p is not None
+                    else ufloat(np.nan, np.nan))
+
     profiles = {}
     for name, (lo, hi, w) in bands.items():
         mu0, sd0 = null_mean_sd(n, d_pts, lo, hi, name, w)
-        z = np.array([(_collapse(r, lo, hi, w)[j] - mu0[j]) / sd0[j] for r in R])
-        p, cov = _fit(centres, z, numax, fwhm)
-        profiles[name] = dict(z=z, popt=p, cov=cov,
-                              peak_z=np.nan if p is None else float(p[0] + p[3]),
-                              centre=ufloat(p[2], np.sqrt(cov[2, 2])) if p is not None
-                              else ufloat(np.nan, np.nan))
+        c = np.array([_collapse(r, lo, hi, w)[j] for r in R])
+        profiles[name] = fitted((c - mu0[j]) / sd0[j])
+        if name == DECIDES:                                  # the ACV check: same bands, not
+            acv = fitted((c * var - mu0[j]) / sd0[j])        # divided by the window variance
     lag = np.linspace(0.0, width, N_LAG_MAP)                 # [Dnu_s]
     amap = (np.array([np.interp(lag * dnu / df, k, r * norm) for r in R]).T if with_map else None)
     main = profiles[DECIDES]
@@ -273,29 +225,26 @@ def comb_scan(frequency, rel_power, numax, width=4.0, span=2.0, with_map=True, a
     return dict(centres=centres, z=main["z"], lag=lag, map=amap, dnu=dnu, D=d_pts[j] * df,
                 fwhm=fwhm, numax=guess, scan_centre=float(numax), width=float(width),
                 popt=main["popt"], numax_comb=centre, peak_z=main["peak_z"],
-                offset=centre.n / guess - 1.0, profiles=profiles)
+                offset=centre.n / guess - 1.0, profiles=profiles, var=var, acv=acv)
 
 
 def significant(r, threshold) -> bool:
-    """True if the deciding (integer) profile has a positive Gaussian with peak z >= threshold."""
+    """True if the integer profile has a positive Gaussian with peak z >= threshold."""
     return (r is not None and r["popt"] is not None and r["popt"][0] > 0
             and r["peak_z"] >= threshold)
 
 
+def acv_significant(r, threshold) -> bool:
+    """True if the ACV check has a positive Gaussian with peak z >= threshold."""
+    return (r is not None and r["acv"]["popt"] is not None and r["acv"]["popt"][0] > 0
+            and r["acv"]["peak_z"] >= threshold)
+
+
 def recentre(frequency, rel_power, numax, width=4.0, span=2.0, threshold=5.0, tolerance=0.1,
              max_iterations=5, with_map=True, aim_at="excess"):
-    """Comb scan around numax, re-centred on the fitted centre until it converges.
+    """Repeat the comb scan on its fitted centre until it moves by <= tolerance x FWHM.
 
-    Args:
-        frequency, rel_power, width, span, with_map, aim_at: see comb_scan.
-        numax: starting numax [muHz].
-        threshold: minimum peak z of a significant envelope.
-        tolerance: converged when the centre moves by <= tolerance x envelope FWHM.
-        max_iterations: scans at most.
-
-    Returns:
-        dict: status ("converged", "not_converged" (last centre used) or "rejected"),
-        numax (ufloat; NaN if rejected), start (numax), scans (list of comb_scan dicts).
+    Returns dict(status = "converged" | "not_converged" | "rejected", numax, start, scans).
     """
     scans, nu = [], float(numax)
     for _ in range(int(max_iterations)):

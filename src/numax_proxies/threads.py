@@ -6,11 +6,7 @@ import numba
 
 @contextmanager
 def numba_threads(n_threads: int | None):
-    """Context manager: use n_threads Numba threads inside the block.
-
-    Args:
-        n_threads: number of threads (capped at NUMBA_NUM_THREADS); None = unchanged.
-    """
+    """Context manager: use n_threads Numba threads inside the block (None = unchanged)."""
     if n_threads is None:
         yield
         return

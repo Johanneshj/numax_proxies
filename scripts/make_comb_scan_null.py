@@ -1,19 +1,9 @@
-"""White-noise null of the comb-scan statistic, for src/numax_proxies/comb_scan_null.json.
+"""White-noise correction of the comb-scan null for line-removed windows (comb_scan_null.json).
 
-The comb scan collapses each window (relative power minus a straight line) to the mean of
-the band means of r(k) over m D +- w D, weighted +1 (correlation) or -1 (anticorrelation,
-sign flipped), for the profiles in comb_scan.PROFILES: integer (1, 2), half (1/2, 3/2),
-combined (1/2, 1, 3/2, 2), anti (1/4 ... 9/4, weight -1) and total (combined + anti).
-For a window with only its MEAN removed, the white-noise mean and sd of c(D) are analytic
-(E r(k) = -(n-k)/n^2, Var r(k) = (n-k)/n^2, lags conditioned on the sum rule; as for the
-ACF delta_nu collapse). Removing a straight line shifts the mean slightly down and narrows
-the spread. This script simulates exponential (chi^2_2) white noise and stores the
-correction relative to the analytic values, per profile,
-    bias  b = (simulated mean - analytic mean) / simulated sd
-    ratio s = simulated sd / analytic sd
-on a grid of window lengths n, x = D / n (D in frequency points) and band half-widths w
-(the comb scan measures w from the data). The comb scan uses
-    mean = analytic mean + b x s x analytic sd,   sd = s x analytic sd.
+The comb scan's null mean and sd are analytic for a window with only its mean removed. This
+script simulates chi^2_2 noise with a straight line removed and stores, per profile, the bias
+and sd ratio relative to the analytic values on a grid of window lengths, D / n and band
+half-widths.
 
     python scripts/make_comb_scan_null.py          (~5 min)
 """
@@ -35,6 +25,7 @@ OUT = Path(__file__).resolve().parents[1] / "src" / "numax_proxies" / "comb_scan
 
 
 def analytic(n, lo, hi, w):
+    """Analytic white-noise mean and sd of a profile (mean-removed window)."""
     k = np.arange(n)
     cs = np.concatenate([[0.0], np.cumsum((n - k) / n ** 2)])
     nb = len(lo)

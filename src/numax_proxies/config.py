@@ -1,16 +1,5 @@
-"""Configuration: dataclasses matching the YAML sections, plus loading and validation.
-
-YAML layout (all sections optional except where noted):
-
-    STAR:        target, cadence, ..., stellar parameters for the scaling relations
-    LIGHTCURVE:  lc_file / fits_file_folder
-    PSD:         psd_file / avg_psd_file
-    CONFIG:      global processing options
-    ACF_CONFIG:  ACF method
-    COV_CONFIG:  CoV method
-
-Unknown keys raise an error (catches typos). Keys that existed in older versions but do
-nothing are accepted with a warning (see DEPRECATED_KEYS).
+"""Configuration: dataclasses for the YAML sections (STAR, LIGHTCURVE, PSD, CONFIG, ACF_CONFIG,
+COV_CONFIG), loading and validation. Unknown keys raise an error; deprecated keys only warn.
 """
 import logging
 import warnings
@@ -112,6 +101,9 @@ class ProcessingConfig:
     comb_scan_tolerance: float = 0.1        # converged when the centre moves <= this x FWHM
     comb_scan_max_iterations: int = 5       # scans per re-centring
     comb_scan_max_refits: int = 3           # refits after rejections, then numax = NaN
+    comb_scan_acv_threshold: float = 5.0    # ACV check (from the comb-scan windows): min. peak z
+                                            # (white noise ~1 %); own estimate numax_ACVscan_<method>
+                                            # (background-corrected with background_correction)
     cov_scan: bool = False                  # power-excess sanity check: CoV in constant windows
                                             # around the shifted numax (report only)
     cov_scan_width: float = 3.0             # window width [Delta-nu of the shifted numax]
@@ -216,7 +208,8 @@ class _MethodConfig:
 @dataclass
 class ACFConfig(_MethodConfig):
     """ACF method."""
-    collapse: Literal["all_lags", "delta_nu"] = "all_lags"   # how each bin's ACF becomes one number
+    collapse: Literal["all_lags", "delta_nu", "autocovariance"] = "all_lags"   # how each bin's ACF
+                                            # becomes one number ("autocovariance": set by the ACV method)
     dnu_window: float = 0.1                 # delta_nu: half-width of each lag band (see dnu_window_mode)
     dnu_window_mode: Literal["relative", "fixed"] = "relative"   # relative: (1 +- w) m Delta-nu;
                                             # fixed: (m +- w) Delta-nu, the same width for every band
@@ -231,8 +224,8 @@ class ACFConfig(_MethodConfig):
     def __post_init__(self):
         """Check collapse, the delta_nu lag window and plot_2dacf."""
         super().__post_init__()
-        if self.collapse not in ("all_lags", "delta_nu"):
-            raise ValueError("ACF_CONFIG.collapse must be 'all_lags' or 'delta_nu'")
+        if self.collapse not in ("all_lags", "delta_nu", "autocovariance"):
+            raise ValueError("ACF_CONFIG.collapse must be 'all_lags', 'delta_nu' or 'autocovariance'")
         if self.dnu_bands is not None:
             if int(self.dnu_bands) != self.dnu_bands or self.dnu_bands < 1:
                 raise ValueError("dnu_bands must be a positive integer")
@@ -298,16 +291,7 @@ DEPRECATED_SECTIONS = {"EACF_CONFIG"}
 
 
 def _build(section: str, cls, values: dict | None):
-    """Build one config section, dropping deprecated keys.
-
-    Args:
-        section: YAML section name.
-        cls: dataclass of the section.
-        values: the section's dictionary (or None).
-
-    Returns:
-        Instance of cls. Raises ValueError for unknown keys.
-    """
+    """Build one config section from its dictionary; unknown keys raise ValueError."""
     values = dict(values or {})
     for key in DEPRECATED_KEYS.get(section, set()) & values.keys():
         values.pop(key)
@@ -320,14 +304,7 @@ def _build(section: str, cls, values: dict | None):
 
 
 def config_from_dict(d: dict) -> GlobalConfig:
-    """Build and validate a configuration from a dictionary with the YAML layout.
-
-    Args:
-        d: {section name: {key: value}}.
-
-    Returns:
-        GlobalConfig.
-    """
+    """Build and validate a configuration from a dictionary with the YAML layout."""
     unknown = set(d) - set(SECTIONS) - DEPRECATED_SECTIONS
     if unknown:
         raise ValueError(f"Unknown section(s): {sorted(unknown)}. Valid: {sorted(SECTIONS)}")
@@ -337,14 +314,7 @@ def config_from_dict(d: dict) -> GlobalConfig:
 
 
 def load_config(yaml_path: str) -> GlobalConfig:
-    """Read and validate a YAML configuration file.
-
-    Args:
-        yaml_path: path to the YAML file. Relative input paths are taken relative to it.
-
-    Returns:
-        GlobalConfig.
-    """
+    """Read and validate a YAML file (relative input paths are taken relative to it)."""
     from pathlib import Path
 
     with open(yaml_path) as f:

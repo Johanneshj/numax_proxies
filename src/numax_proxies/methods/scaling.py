@@ -16,15 +16,7 @@ def _values(gaia_values, star_values, star_errors):
 
 
 def numax_from_scaling_relations(star, gaia_data) -> dict:
-    """numax from every combination of the available stellar parameters.
-
-    Args:
-        star: StarInfo (user values and errors).
-        gaia_data: GaiaData.
-
-    Returns:
-        {"numax_SR_<relation>_<i>": numax (ufloat)}.
-    """
+    """numax from every combination of the available stellar parameters: {label: ufloat}."""
     g = gaia_data
     teffs = _values([g.teff_gspspec, g.teff_gspphot], star.teff, star.teff_err)
     loggs = _values([g.logg_gspspec, g.logg_gspphot], star.logg, star.logg_err)

@@ -1,10 +1,4 @@
-"""Spectrum preparation shared by the ACF and CoV methods.
-
-1. replace_below_min_freq  - optional: replace the PSD below min_freq with white noise
-2. running_median          - pseudo-running median over an envelope-sized window
-3. log_numax_bins          - overlapping bins of width  w * Delta-nu(nu)
-4. smooth_over_envelope    - running mean over  s * envelope FWHM(nu)  (in bin-centre space)
-"""
+"""Spectrum preparation shared by the methods: running median, bins of width w x Delta-nu, and smoothing of binned curves."""
 import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
@@ -19,17 +13,7 @@ DEFAULT_MEDIAN_FILTER_FACTOR = 2.0 * np.log(2)   # window = 2 ln2 x envelope FWH
 # --------------------------------------------------------------------------------------
 def replace_below_min_freq(frequency: NDArray, power: NDArray, min_freq: float,
                            seed: int = 42) -> NDArray:
-    """Replace the PSD at frequencies <= min_freq with chi^2_2 white noise.
-
-    Args:
-        frequency: frequency grid [muHz].
-        power: PSD.
-        min_freq: upper limit of the replaced range [muHz].
-        seed: random seed.
-
-    Returns:
-        Copy of power; the noise mean is median / ln 2 of the replaced points.
-    """
+    """Copy of the PSD with the part below min_freq replaced by white noise."""
     power = np.array(power, dtype=np.float64, copy=True)
     mask = frequency <= min_freq
     if np.any(mask):
@@ -44,7 +28,7 @@ def replace_below_min_freq(frequency: NDArray, power: NDArray, min_freq: float,
 # --------------------------------------------------------------------------------------
 @njit(cache=True)
 def _eval_indices(frequency, factor, step_fraction):
-    """Evaluation points every step_fraction x local window width (at least every point)."""
+    """Points where the running median is evaluated (every step_fraction x window width)."""
     n = len(frequency)
     df = (frequency[-1] - frequency[0]) / (n - 1)
     out = np.empty(n, dtype=np.int64)
@@ -60,11 +44,7 @@ def _eval_indices(frequency, factor, step_fraction):
 
 @njit(parallel=True, cache=True)
 def _running_median_coarse(frequency, power, factor, eval_indices):
-    """Median in windows of factor x envelope FWHM at the given points.
-
-    Returns:
-        Medians at frequency[eval_indices].
-    """
+    """Median over factor x envelope FWHM at the given points."""
     n = len(power)
     df = (frequency[-1] - frequency[0]) / (n - 1)
     m = len(eval_indices)
@@ -84,20 +64,7 @@ def _running_median_coarse(frequency, power, factor, eval_indices):
 def running_median(frequency: NDArray, power: NDArray,
                    factor: float = DEFAULT_MEDIAN_FILTER_FACTOR,
                    step_fraction: float = 0.01) -> NDArray:
-    """Running median of the PSD over factor x envelope FWHM(nu).
-
-    The median is evaluated every step_fraction x local window width (at least every point)
-    and interpolated linearly in between; over 1 % of its own window the median barely changes.
-
-    Args:
-        frequency: uniform frequency grid [muHz].
-        power: PSD.
-        factor: window width in envelope FWHM.
-        step_fraction: step between evaluated points, in units of the local window width.
-
-    Returns:
-        Running median on the full frequency grid.
-    """
+    """Running median of the PSD over factor x envelope FWHM, evaluated in steps and interpolated."""
     frequency = np.ascontiguousarray(frequency, dtype=np.float64)
     power = np.ascontiguousarray(power, dtype=np.float64)
     if len(frequency) < 2:
@@ -114,18 +81,7 @@ def running_median(frequency: NDArray, power: NDArray,
 # --------------------------------------------------------------------------------------
 def log_numax_bins(frequency: NDArray, min_freq: float, max_freq: float | None,
                    width_factor: float, overlap_scale: float):
-    """Overlapping bins of width width_factor x Delta-nu(bin centre).
-
-    Args:
-        frequency: frequency grid [muHz], ascending.
-        min_freq: first bin centre [muHz].
-        max_freq: last allowed bin centre [muHz]; None = end of the spectrum.
-        width_factor: bin width in units of Delta-nu.
-        overlap_scale: bins per bin width (step = width / overlap_scale).
-
-    Returns:
-        (centres, idx_start, idx_end); bin i covers power[idx_start[i]:idx_end[i]].
-    """
+    """Overlapping bins of width width_factor x Delta-nu: (centres, idx_start, idx_end)."""
     if max_freq is None:
         max_freq = frequency[-1]
 
@@ -149,7 +105,7 @@ def log_numax_bins(frequency: NDArray, min_freq: float, max_freq: float | None,
 # --------------------------------------------------------------------------------------
 @njit(cache=True)
 def _lower_bound(arr, value):
-    """First index with arr[i] >= value (arr ascending)."""
+    """First index with arr[i] >= value."""
     lo, hi = 0, len(arr)
     while lo < hi:
         mid = (lo + hi) // 2
@@ -162,7 +118,7 @@ def _lower_bound(arr, value):
 
 @njit(cache=True)
 def _upper_bound(arr, value):
-    """First index with arr[i] > value (arr ascending)."""
+    """First index with arr[i] > value."""
     lo, hi = 0, len(arr)
     while lo < hi:
         mid = (lo + hi) // 2
@@ -175,11 +131,7 @@ def _upper_bound(arr, value):
 
 @njit(cache=True)
 def _smooth_numba(centres, values, factor):
-    """Mean of values over bins within +- factor x FWHM(centre) / 2.
-
-    Returns:
-        Smoothed array; NaNs are ignored, +-inf propagate.
-    """
+    """Running mean of values over +- factor x FWHM / 2 around each centre (NaNs ignored)."""
     n = len(centres)
     smoothed = np.full(n, np.nan)
 
@@ -227,16 +179,7 @@ def _smooth_numba(centres, values, factor):
 
 
 def smooth_over_envelope(centres: NDArray, values: NDArray, smoothing_factors) -> dict:
-    """Running mean of a binned curve over smoothing_factor x envelope FWHM.
-
-    Args:
-        centres: bin centres [muHz], ascending.
-        values: curve at the bin centres.
-        smoothing_factors: scalar or list of window widths in envelope FWHM.
-
-    Returns:
-        {smoothing_factor: smoothed array}.
-    """
+    """Running mean of a binned curve over each smoothing factor x envelope FWHM: {factor: curve}."""
     centres = np.ascontiguousarray(centres, dtype=np.float64)
     values = np.ascontiguousarray(values, dtype=np.float64)
     if len(centres) != len(values):

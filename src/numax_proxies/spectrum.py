@@ -1,7 +1,7 @@
-"""Power spectra from light curves and averaged spectra.
+"""Power spectra from light curves: Lomb-Scargle PSD and averaged PSD.
 
-Periodogram routines adapted from Martin Nielsen (Porto summer school 2024).
-Averaged PSD: Sylvain Breton (INAF-OACT) and Johannes Jorgensen (UIBK).
+Periodogram routines adapted from Martin Nielsen (Porto summer school 2024); averaged PSD:
+Sylvain Breton (INAF-OACT) and Johannes Jorgensen (UIBK).
 """
 import logging
 
@@ -21,30 +21,12 @@ DAY_TO_MUHZ = 1e6 / 86400   # 1 cycle/day in muHz
 # Periodogram
 # --------------------------------------------------------------------------------------
 def nyquist(time) -> float:
-    """Nyquist frequency of a time series.
-
-    Args:
-        time: time stamps.
-
-    Returns:
-        Nyquist frequency [cycles per time unit].
-    """
+    """Nyquist frequency of a time series."""
     return 1 / (2 * np.mean(np.diff(time)))
 
 
 def spectral_window(time, df: float, nyq: float, oversampling: float = 1.0, width=None):
-    """Spectral window around nyq / 2, normalised to 1 at its centre.
-
-    Args:
-        time: time stamps [days].
-        df: frequency step [1/day].
-        nyq: Nyquist frequency [1/day].
-        oversampling: oversampling factor.
-        width: half-width of the window [1/day]; None = 100 df.
-
-    Returns:
-        (frequency offsets from the centre, window power).
-    """
+    """Spectral window around nyq / 2, normalised to 1 at its centre."""
     width = 100 * df if width is None else width
     freq_cen = 0.5 * nyq
     n_freq = int(oversampling * width / df)
@@ -57,34 +39,14 @@ def spectral_window(time, df: float, nyq: float, oversampling: float = 1.0, widt
 
 
 def frequency_resolution(time, nyq: float, oversampling: float = 1.0, width=None) -> float:
-    """Effective frequency resolution: integral of the spectral window.
-
-    Args:
-        time: time stamps [days].
-        nyq: Nyquist frequency [1/day].
-        oversampling: oversampling factor.
-        width: half-width of the window [1/day]; None = 100 df.
-
-    Returns:
-        Resolution [1/day].
-    """
+    """Effective frequency resolution: the integral of the spectral window."""
     df = 1 / (np.nanmax(time) - np.nanmin(time))
     f, w = spectral_window(time, df, nyq, oversampling, width)
     return simpson(w, x=f)
 
 
 def periodogram(lc: LightCurveData, oversampling: float = 1.0, width_for_wf=None) -> PSDData:
-    """Lomb-Scargle power spectral density of a light curve, calibrated with Parseval
-    (ppm^2/muHz).
-
-    Args:
-        lc: LightCurveData (time [days], flux [ppm]).
-        oversampling: oversampling factor.
-        width_for_wf: half-width of the spectral window [1/day]; None = default.
-
-    Returns:
-        PSDData (frequency [muHz], psd).
-    """
+    """Lomb-Scargle PSD of a light curve in ppm^2/muHz (Parseval-calibrated)."""
     ls = LombScargle(t=lc.time, y=lc.flux, fit_mean=False, center_data=True)
     nyq = nyquist(lc.time)
     df = frequency_resolution(lc.time, nyq, oversampling, width_for_wf)
@@ -101,19 +63,7 @@ def periodogram(lc: LightCurveData, oversampling: float = 1.0, width_for_wf=None
 def averaged_psd(lc: LightCurveData, chunk_days: float = 90.0, overlap: float = 0.0,
                  oversampling: float = 1.0, method: str = "median",
                  n_threads: int | None = None) -> PSDData:
-    """Average of Hann-windowed Lomb-Scargle PSDs of light-curve chunks.
-
-    Args:
-        lc: LightCurveData.
-        chunk_days: chunk length [days]; shortened until < half the light curve.
-        overlap: fraction of a chunk shared with the next one, in [0, 1).
-        oversampling: oversampling factor.
-        method: "median" or "mean".
-        n_threads: threads for nifty_ls.
-
-    Returns:
-        PSDData (frequency [muHz], psd). Not chi^2_2 distributed.
-    """
+    """Average (median or mean) of Hann-windowed PSDs of overlapping light-curve chunks."""
     import nifty_ls
     from numpy.lib.stride_tricks import sliding_window_view
 

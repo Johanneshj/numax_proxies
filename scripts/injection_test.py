@@ -1,16 +1,10 @@
-"""Injection tests on synthetic spectra with a known numax.
-
-For every (numax, height_ratio) and realisation, the ACF and CoV are run on a synthetic
-Kepler-like PSD; pure white-noise spectra measure the false-alarm rate. For every grid
-setting we record whether a numax was returned and its value.
+"""Injection test: run the ACF and CoV on synthetic spectra with a known numax (and on pure noise).
 
     python scripts/injection_test.py --out injection.parquet --n-real 20
     python scripts/injection_test.py --settings my_grid.yaml     # ACF/COV sections only
 
-Summary per method / width_factor printed at the end:
-    detected   % of realisations with a numax
-    within10   % of realisations with |numax - true| / true <= 10 %
-    medape     median |numax - true| / true  [%]
+Prints, per method and width_factor, the detection rate, the fraction within 10 % and the
+median absolute error.
 """
 import argparse
 import logging

@@ -1,11 +1,7 @@
-"""Kepler short-cadence artefacts: detection-based cleaning and a comb check of fitted numax.
+"""Kepler short-cadence artefacts (STAR.cadence == "Kepler_SC").
 
-Both are used only for STAR.cadence == "Kepler_SC" (switches in CONFIG):
-  artefact_cleaning : at each listed artefact frequency, clean the spectrum only if a
-                      significant narrow peak is found there (the oscillation comb survives).
-  comb_check        : after a fit, require a significant peak in the power spectrum of the
-                      power spectrum (psps) near 1/Delta-nu or 2/Delta-nu of the fitted numax;
-                      "near_artefacts" (only fits near a listed artefact) or "always".
+artefact_cleaning: replace a listed artefact by noise only where a significant narrow peak is
+found. comb_check: require a significant PSPS peak near 1/Delta-nu or 2/Delta-nu of a fitted numax.
 """
 import logging
 
@@ -33,8 +29,7 @@ KEPLER_SC_ARTEFACTS = [
 
 
 def max_exceedance_threshold(n_points: int, fap: float) -> float:
-    """Threshold u such that the largest of n_points independent Exp(1) values exceeds u
-    with probability fap: P(max > u) = 1 - (1 - exp(-u))^n."""
+    """Threshold that the largest of n_points Exp(1) values exceeds with probability fap."""
     return float(-np.log(-np.expm1(np.log1p(-fap) / max(n_points, 1))))
 
 
@@ -44,29 +39,9 @@ def max_exceedance_threshold(n_points: int, fap: float) -> float:
 def clean_detected_artefacts(frequency, power, rng, fap=0.01, search_halfwidth=1.0,
                              max_halfwidth=3.0, broad_factor=5.0, clip=3.0,
                              artefacts=KEPLER_SC_ARTEFACTS, med=None):
-    """Clean listed artefacts only where a significant narrow peak is present.
+    """Replace listed artefacts by noise where a significant narrow peak is found.
 
-    For each artefact nu0: the PSD is divided by its running median and expressed in units
-    of the mean (x = P / median * ln 2, ~Exp(1) for noise). If the largest x within
-    +- search_halfwidth of nu0 exceeds the max-of-M threshold at fap, the contiguous points
-    around that maximum with x > clip (at most +- max_halfwidth around it) are replaced by
-    chi^2_2 noise with the local mean power. Broad artefacts use broad_factor x both widths.
-
-    Args:
-        frequency: frequency grid [muHz] (uniform).
-        power: PSD.
-        rng: numpy random generator.
-        fap: false-alarm probability of the detection, per artefact.
-        search_halfwidth: [muHz] search window around each listed frequency.
-        max_halfwidth: [muHz] largest half-width that is replaced.
-        broad_factor: widths multiplied by this for broad artefacts.
-        clip: [mean power] the replaced region extends while x > clip.
-        artefacts: [(frequency [muHz], "narrow" | "broad")].
-        med: running median of power (default window); None = computed here.
-
-    Returns:
-        (cleaned power, report: list of dicts with frequency, detected, peak [muHz],
-        x_max, threshold, lo, hi [muHz]).
+    Returns (cleaned power, report per artefact).
     """
     frequency = np.asarray(frequency, dtype=float)
     power = np.array(power, dtype=float, copy=True)
@@ -102,18 +77,7 @@ def clean_detected_artefacts(frequency, power, rng, fap=0.01, search_halfwidth=1
 
 
 def replace_regions(frequency, power, regions, rng, med=None):
-    """Replace the power in fixed frequency regions with chi^2_2 noise at the local level.
-
-    Args:
-        frequency: frequency grid [muHz].
-        power: PSD.
-        regions: [[lo, hi], ...] [muHz].
-        rng: numpy random generator.
-        med: running median of power (default window); None = computed here.
-
-    Returns:
-        Copy of power.
-    """
+    """Copy of the PSD with fixed frequency regions replaced by noise at the local level."""
     frequency = np.asarray(frequency, dtype=float)
     power = np.array(power, dtype=float, copy=True)
     if not regions:
@@ -130,37 +94,17 @@ def replace_regions(frequency, power, regions, rng, med=None):
 # Option 2: comb check with the power spectrum of the power spectrum
 # --------------------------------------------------------------------------------------
 def near_artefact(numax: float, distance: float = 0.25, artefacts=KEPLER_SC_ARTEFACTS) -> bool:
-    """Is a listed artefact within distance x envelope FWHM of numax?"""
+    """True if a listed artefact is within distance x envelope FWHM of numax."""
     if not np.isfinite(numax) or numax <= 0:
         return False
     return any(abs(nu0 - numax) <= distance * envelope_fwhm(numax) for nu0, _ in artefacts)
 
 
 def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0, oversampling=1):
-    """Power spectrum of the power spectrum (PSPS) around numax: comb test and Delta-nu.
+    """Power spectrum of the power spectrum around numax: comb test and Delta-nu.
 
-    The relative power x = P / median - 1 within +- n_fwhm envelope FWHM of numax is
-    centred and Fourier transformed; z(t) = |FT_t|^2 / (N var(x)) is ~Exp(1) at every t > 0
-    for white noise. A comb with spacing Delta-nu gives peaks at t = 1 / Delta-nu and (from
-    the Delta-nu / 2 spacing of l = 0 and l = 1) at 2 / Delta-nu; a single spike gives a flat
-    PSPS. The largest z at t within +- tolerance of 1/Delta-nu(numax) or 2/Delta-nu(numax) is
-    compared with the max-of-M threshold at fap.
-
-    Args:
-        frequency: frequency grid [muHz] (uniform).
-        rel_power: P / median - 1 on that grid.
-        numax: [muHz].
-        tolerance: relative search range around 1/Delta-nu and 2/Delta-nu.
-        fap: false-alarm probability of the test.
-        n_fwhm: half-width of the stretch of spectrum, in envelope FWHM.
-        oversampling: zero-padding factor for t_fine / z_fine (plot and spacing only; the
-            test uses the independent points t, z).
-
-    Returns:
-        dict with t [1/muHz], z (independent points), search (bool mask), threshold,
-        dnu (Delta-nu(numax)), z_max, comb (bool), t_fine, z_fine (oversampled PSPS) and
-        spacing (Delta-nu of the strongest oversampled peak in the search ranges [muHz]);
-        None if the stretch is too short.
+    Returns a dict with the PSPS (t, z, oversampled t_fine, z_fine), the threshold, comb (bool) and
+    spacing (Delta-nu estimate); None if the stretch of spectrum is too short.
     """
     if not np.isfinite(numax) or numax <= 0:
         return None
@@ -204,16 +148,7 @@ def psps(frequency, rel_power, numax, tolerance=0.3, fap=0.01, n_fwhm=1.0, overs
 
 
 class CombChecker:
-    """numax -> passes the comb check? (results cached on numax in 0.1 % steps).
-
-    Args:
-        frequency: frequency grid [muHz].
-        rel_power: P / median - 1.
-        mode: "near_artefacts" (test only fits within distance x envelope FWHM of a listed
-            artefact) or "always".
-        tolerance, fap: see psps.
-        distance: see near_artefact.
-    """
+    """numax -> passes the comb check? (cached; "near_artefacts" tests only fits near a listed artefact)."""
 
     def __init__(self, frequency, rel_power, mode="near_artefacts", tolerance=0.3, fap=0.01,
                  distance=0.25):

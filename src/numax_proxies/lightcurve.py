@@ -1,9 +1,4 @@
-"""Getting and processing light curves.
-
-get_lightcurve() chooses the source: a light-curve file, a folder with Kepler/TESS fits
-files, or a lightkurve download by target name. The processing functions each take and
-return a LightCurveData object.
-"""
+"""Getting light curves (file, fits folder or lightkurve download) and processing them (sort, ppm, gaps, detrending)."""
 import glob
 import logging
 
@@ -36,15 +31,7 @@ def _from_lightkurve(lc) -> LightCurveData:
 
 
 def lightcurve_from_fits(folder: str, target: str) -> LightCurveData:
-    """Stitch the fits files of a target in a folder.
-
-    Args:
-        folder: folder with kplr<KIC>* (Kepler) or *<TIC>* (TESS) fits files.
-        target: "KIC..." or "TIC...".
-
-    Returns:
-        LightCurveData.
-    """
+    """Stitch the Kepler (kplr<KIC>*) or TESS (*<TIC>*) fits files of a target in a folder."""
     import lightkurve as lk
 
     number = int("".join(filter(str.isdigit, target)))
@@ -59,16 +46,7 @@ def lightcurve_from_fits(folder: str, target: str) -> LightCurveData:
 
 def lightcurve_from_download(target: str, author=None, cadence=None, quarter=None,
                              sector=None) -> LightCurveData:
-    """Download and stitch a light curve with lightkurve.
-
-    Args:
-        target: "KIC..." or "TIC...".
-        author, cadence, quarter, sector: lightkurve search options (default author:
-            Kepler for KIC, SPOC for TIC).
-
-    Returns:
-        LightCurveData.
-    """
+    """Download and stitch a light curve with lightkurve."""
     import lightkurve as lk
 
     mission = _mission_of(target)
@@ -83,15 +61,7 @@ def lightcurve_from_download(target: str, author=None, cadence=None, quarter=Non
 
 
 def get_lightcurve(star, lc_input) -> LightCurveData:
-    """Light curve from the first available source: lc_file, fits folder, download.
-
-    Args:
-        star: StarInfo.
-        lc_input: LightCurveInput.
-
-    Returns:
-        LightCurveData.
-    """
+    """Light curve from the first available source: lc_file, fits folder, download."""
     if lc_input.lc_file:
         return load_lightcurve_file(lc_input.lc_file)
     if lc_input.fits_file_folder:
@@ -107,14 +77,7 @@ def get_lightcurve(star, lc_input) -> LightCurveData:
 # Processing
 # --------------------------------------------------------------------------------------
 def sort_by_time(lc: LightCurveData) -> LightCurveData:
-    """Drop duplicate time stamps, sort, and start the time axis at 0.
-
-    Args:
-        lc: LightCurveData.
-
-    Returns:
-        LightCurveData.
-    """
+    """Drop duplicate time stamps, sort, and start the time axis at 0."""
     _, idx = np.unique(lc.time, return_index=True)
     time, flux, err = lc.time[idx], lc.flux[idx], lc.flux_err[idx]
     order = np.argsort(time)
@@ -123,28 +86,13 @@ def sort_by_time(lc: LightCurveData) -> LightCurveData:
 
 
 def normalize_to_ppm(lc: LightCurveData) -> LightCurveData:
-    """Flux -> (flux / median - 1) x 1e6; errors scaled accordingly.
-
-    Args:
-        lc: LightCurveData.
-
-    Returns:
-        LightCurveData in ppm.
-    """
+    """Flux -> (flux / median - 1) x 1e6."""
     med = np.nanmedian(lc.flux)
     return LightCurveData(lc.time.copy(), (lc.flux / med - 1) * 1e6, lc.flux_err / med * 1e6)
 
 
 def close_gaps(lc: LightCurveData, gap_size_days: float) -> LightCurveData:
-    """Shorten every gap longer than gap_size_days to gap_size_days.
-
-    Args:
-        lc: LightCurveData.
-        gap_size_days: maximum gap [days].
-
-    Returns:
-        LightCurveData.
-    """
+    """Shorten every gap longer than gap_size_days to gap_size_days."""
     time = lc.time.copy()
     gaps = np.concatenate((np.where(np.diff(time) > gap_size_days)[0], [len(time) - 1]))
     for i in range(1, len(gaps)):
@@ -155,16 +103,7 @@ def close_gaps(lc: LightCurveData, gap_size_days: float) -> LightCurveData:
 
 
 def savgol_detrend(lc: LightCurveData, window_days: float, polyorder: int = 3):
-    """Subtract a Savitzky-Golay filter.
-
-    Args:
-        lc: LightCurveData.
-        window_days: filter window [days].
-        polyorder: polynomial order.
-
-    Returns:
-        (detrended LightCurveData, filter).
-    """
+    """Subtract a Savitzky-Golay filter: (detrended light curve, filter)."""
     dt = np.median(np.diff(lc.time))
     wl = int(window_days / dt)
     if wl % 2 == 0:
@@ -174,15 +113,6 @@ def savgol_detrend(lc: LightCurveData, window_days: float, polyorder: int = 3):
 
 
 def inject_noise(lc: LightCurveData, noise_std: float, rng: np.random.Generator) -> LightCurveData:
-    """Add Gaussian white noise.
-
-    Args:
-        lc: LightCurveData.
-        noise_std: standard deviation [flux units, ppm].
-        rng: numpy random generator.
-
-    Returns:
-        LightCurveData.
-    """
+    """Add Gaussian white noise of standard deviation noise_std."""
     return LightCurveData(lc.time.copy(), lc.flux + rng.normal(0, noise_std, len(lc.flux)),
                           lc.flux_err.copy())

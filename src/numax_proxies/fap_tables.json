@@ -1,7 +1,5 @@
 {
- "description": "Per-bin white-noise thresholds for bins of N independent chi^2_2 points (scripts/make_fap_tables.py). ACF: thresholds of MCC - mu0, with mu0 the white-noise mean MCC. CoV: thresholds of the CoV.",
- "created": "2026-11-19",
- "source": "statistics in fap_tables_output",
+ "description": "Per-bin white-noise thresholds for bins of N independent chi^2_2 points (scripts/make_fap_tables.py). ACF: thresholds of MCC - mu0, with mu0 the white-noise mean MCC. ACV: the same for the mean |autocovariance|. CoV: thresholds of the CoV.",
  "N": [
   4,
   8,
@@ -19,6 +17,29 @@
   32768,
   65536
  ],
+ "created": "2026-11-19",
+ "source": "statistics in fap_tables_output",
+ "ACV_meta": {
+  "created": "2026-11-24",
+  "source": "statistics in fap_tables_acv",
+  "bins_per_N": [
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   1000000,
+   610351,
+   305175,
+   152587
+  ]
+ },
  "ACF": {
   "95": [
    0.18021063,
@@ -106,6 +127,59 @@
    1.01838076,
    1.01297832,
    1.0091933
+  ]
+ },
+ "ACV": {
+  "95": [
+   0.9802141,
+   0.55015424,
+   0.30294481,
+   0.16291099,
+   0.08532879,
+   0.04376946,
+   0.02220193,
+   0.01118393,
+   0.00557309,
+   0.00278135,
+   0.00138348,
+   0.0006892,
+   0.00034346,
+   0.00017146,
+   8.554e-05
+  ],
+  "99": [
+   2.25664175,
+   1.113549,
+   0.56059539,
+   0.28208614,
+   0.13988998,
+   0.06920092,
+   0.03407452,
+   0.01685211,
+   0.00825983,
+   0.00405456,
+   0.00200911,
+   0.00099173,
+   0.00049048,
+   0.00024379,
+   0.00012198
+  ],
+  "mu0": [
+   0.38543044,
+   0.30178925,
+   0.23324544,
+   0.1759034,
+   0.12970026,
+   0.09417521,
+   0.06771143,
+   0.04834074,
+   0.03437871,
+   0.02438076,
+   0.01726666,
+   0.01222084,
+   0.00864494,
+   0.00611437,
+   0.00432402
   ]
  }
 }

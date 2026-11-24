@@ -17,14 +17,7 @@ LC_FORMATS = ".csv (time,flux[,flux_err]), .ftr/.feather, .parquet"
 # Spectra
 # --------------------------------------------------------------------------------------
 def load_psd(filename: str) -> PSDData:
-    """Load a PSD file (rows with NaNs are dropped).
-
-    Args:
-        filename: .csv, .txt, .pow, .ftr/.feather or .parquet with frequency [muHz], power.
-
-    Returns:
-        PSDData.
-    """
+    """Load a PSD file (csv, txt, pow, feather or parquet: frequency [muHz], power); NaN rows dropped."""
     filename = str(filename)
     suffix = Path(filename).suffix.lower()
     if suffix == ".csv":
@@ -51,12 +44,7 @@ def load_psd(filename: str) -> PSDData:
 
 
 def save_psd(psd: PSDData, path: Path) -> None:
-    """Save a PSD as parquet (columns frequency, power).
-
-    Args:
-        psd: PSDData.
-        path: output file.
-    """
+    """Save a PSD as parquet (frequency, power)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"frequency": psd.frequency, "power": psd.psd}).to_parquet(path, index=False)
@@ -66,14 +54,7 @@ def save_psd(psd: PSDData, path: Path) -> None:
 # Light curves
 # --------------------------------------------------------------------------------------
 def load_lightcurve_file(filename: str) -> LightCurveData:
-    """Load a light curve file.
-
-    Args:
-        filename: .csv (time, flux[, flux_err]), .ftr/.feather or .parquet; time in days.
-
-    Returns:
-        LightCurveData. Missing flux_err: 50 (csv) or the flux standard deviation.
-    """
+    """Load a light curve file (csv, feather or parquet: time [days], flux[, flux_err])."""
     filename = str(filename)
     suffix = Path(filename).suffix.lower()
     if suffix == ".csv":
@@ -104,12 +85,7 @@ def load_lightcurve_file(filename: str) -> LightCurveData:
 
 
 def save_lightcurve(lc: LightCurveData, path: Path) -> None:
-    """Save a light curve as parquet (columns time, flux, flux_err).
-
-    Args:
-        lc: LightCurveData.
-        path: output file.
-    """
+    """Save a light curve as parquet (time, flux, flux_err)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"time": lc.time, "flux": lc.flux, "flux_err": lc.flux_err}).to_parquet(path, index=False)

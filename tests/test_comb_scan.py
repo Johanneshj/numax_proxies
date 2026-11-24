@@ -85,3 +85,28 @@ def test_excess_peak_finds_the_envelope():
     rel = relative_power(psd.frequency, psd.psd)
     for start in (100.0, 80.0):
         assert abs(excess_peak(psd.frequency, rel, start, 2.0) / 100.0 - 1) < 0.15
+
+
+def test_acv_check_white_noise_and_envelope():
+    """ACV check: window variance ~ white-noise variance on noise; significant on an envelope."""
+    from numax_proxies.comb_scan import acv_significant
+    from numax_proxies.synthetic import synthetic_psd
+    rng = np.random.default_rng(12)
+    f = np.arange(0.0079, 283, 0.0079)
+    r = comb_scan(f, relative_power(f, rng.exponential(size=f.size)), 100.0, with_map=False)
+    assert abs(np.median(r["var"]) - 1) < 0.05
+    psd = synthetic_psd(100.0, 3.0, rng=np.random.default_rng(1))
+    r = comb_scan(psd.frequency, relative_power(psd.frequency, psd.psd), 100.0, with_map=False)
+    assert acv_significant(r, 5.0) and abs(r["acv"]["centre"].n / 100.0 - 1) < 0.15
+
+
+def test_acv_check_in_pipeline():
+    from numax_proxies import NumaxProxies
+    from numax_proxies.synthetic import synthetic_psd
+    psd = synthetic_psd(50.0, 3.0, rng=np.random.default_rng(4))
+    p = NumaxProxies.from_psd(psd.frequency, psd.psd, {"CONFIG": {"comb_scan": True}})
+    p.compute_numax_from_acf()
+    assert np.isfinite(p.numax_estimates["numax_ACVscan_ACF"].n)
+    assert "numax_ACVscan_ACF" not in p.COMBINED_FROM
+    t = p.comb_scan_table
+    assert bool(t.acv_significant.iloc[0]) and np.isfinite(t.acv_peak_z.iloc[0])

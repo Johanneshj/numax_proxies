@@ -1,5 +1,4 @@
-"""All figures, one A&A column wide (8.8 cm). Each function saves into
-<results_directory>/<target>/figures/ in the formats of CONFIG.figure_format (png, pdf)."""
+"""All figures (A&A column width), saved to <results_directory>/<target>/figures/ in CONFIG.figure_format."""
 import functools
 from pathlib import Path
 
@@ -82,15 +81,7 @@ def _set_xlim(ax, cfg, fallback_max):
 # --------------------------------------------------------------------------------------
 @_aa_style
 def plot_lightcurve_and_psd(lc, psd, config, target, trend=None, raw_flux=None):
-    """Save lc_and_pg: light curve (and Savitzky-Golay trend) and PSD.
-
-    Args:
-        lc: LightCurveData.
-        psd: PSDData.
-        config: ProcessingConfig.
-        target: star name.
-        trend, raw_flux: Savitzky-Golay filter and flux before detrending (optional).
-    """
+    """Save lc_and_pg: light curve (with the Savitzky-Golay trend, if any) and PSD."""
     fig, axs = plt.subplots(2, 1, figsize=(COLUMN_WIDTH, 4.2))
     if trend is not None:
         axs[0].plot(lc.time, raw_flux, c="k", rasterized=True)
@@ -121,15 +112,7 @@ ACF_MAP_CMAP = "bwr"
 
 
 def plot_acf_map(ax, method):
-    """Draw the 2D ACF of one grid setting into ax.
-
-    Colour: r(k) / white-noise sd, blue = anticorrelated, white = noise, red = correlated.
-    Lag axis: units of Delta-nu(bin center) for collapse delta_nu, muHz for all_lags.
-
-    Args:
-        ax: matplotlib axes.
-        method: NumaxFromACF after compute().
-    """
+    """Draw the 2D ACF of one grid setting (r / white-noise sd; the raw ACV for the ACV method)."""
     from .binning import log_numax_bins
     from .methods.acf import acf_map, band_edges
 
@@ -139,9 +122,11 @@ def plot_acf_map(ax, method):
     centres, i0, i1 = log_numax_bins(freq, float(max(freq[0], cfg.min_freq)), cfg.max_freq,
                                      factor, scale)
     in_dnu = cfg.collapse == "delta_nu"
+    acv = cfg.collapse == "autocovariance"
     lags, z = acf_map(freq, method.normalized_power, centres, i0, i1,
-                      lag_unit="dnu" if in_dnu else "muHz")
-    ax.pcolormesh(centres, lags, z, shading="nearest", cmap=ACF_MAP_CMAP, vmin=-4, vmax=4,
+                      lag_unit="dnu" if in_dnu else "muHz", normalise=not acv)
+    vmax = float(np.nanpercentile(np.abs(z), 99)) if acv else 4.0
+    ax.pcolormesh(centres, lags, z, shading="nearest", cmap=ACF_MAP_CMAP, vmin=-vmax, vmax=vmax,
                   rasterized=True)
     if in_dnu:
         lo, hi = band_edges(cfg.dnu_multiples, cfg.dnu_window, cfg.dnu_window_mode)
@@ -152,23 +137,16 @@ def plot_acf_map(ax, method):
         ax.set(ylabel=r"lag [$\Delta\nu(\nu_\mathrm{c})$]", ylim=(0, factor))
     else:
         ax.set(ylabel=_freq_label("lag"), ylim=(0, lags[-1]))
-    ax.text(0.98, 0.96, f"overlap {scale:g}, width {factor:g}", ha="right", va="top",
+    label = f"overlap {scale:g}, width {factor:g}"
+    if acv:
+        label += f"\nACV, colour $\\pm${vmax:.2g}"
+    ax.text(0.98, 0.96, label, ha="right", va="top",
             transform=ax.transAxes, fontsize=6,
             bbox=dict(facecolor="white", alpha=0.7, lw=0, pad=1))
 
 
 def plot_comb_check_panel(ax, method):
-    """Draw the comb check (PSPS) around the method's numax.
-
-    PSPS against 2/t, so the strongest peak (period Delta-nu / 2) sits at Delta-nu:
-    oversampled (line, psps_oversampling) and the independent points the test uses (dots);
-    shaded: the search ranges around Delta-nu and 2 Delta-nu of numax; dashed: the
-    threshold; circle: the tested maximum; dotted: the Delta-nu estimate.
-
-    Args:
-        ax: matplotlib axes.
-        method: NumaxFromACF or NumaxFromCoV after compute().
-    """
+    """Draw the comb check (PSPS around numax, search ranges, threshold, Delta-nu)."""
     from .artefacts import psps
 
     cfg = method.config
@@ -213,7 +191,7 @@ def _right_axis(ax):
 
 
 def _draw_spectrum(ax, method):
-    """PSD and running median of an ACF/CoV method."""
+    """PSD and running median of a method."""
     ax.loglog(method.frequency, method.power, c="gray", lw=0.4, label="spectrum", rasterized=True)
     ax.loglog(method.frequency, method.med_filter, c="k", label="running median")
     ax.set(xlabel=_freq_label(), ylabel=_psd_label())
@@ -223,7 +201,7 @@ def _draw_spectrum(ax, method):
 
 
 def _draw_final(ax, method, handles):
-    """Solid line at the method's final numax (after comb scan / background correction)."""
+    """Line at the method's final numax."""
     final = method.numax_estimate.n
     if np.isfinite(final):
         ax.axvline(final, c="m", lw=1.2, zorder=2)
@@ -232,7 +210,7 @@ def _draw_final(ax, method, handles):
 
 
 def _draw_cacf(ax, method):
-    """CACF curves, thresholds and fits of every grid setting."""
+    """Collapsed-statistic curves, thresholds and fits of every grid setting."""
     cfg, results = method.cfg, method.results
     for data in results.values():
         bcs = np.asarray(data["bin_centers"])
@@ -255,20 +233,14 @@ def _draw_cacf(ax, method):
         ax.axvline(method.initial_numax, c="green", ls="-.")
         handles.append(Line2D([0], [0], color="green", ls="-.", label="initial guess"))
     ax.legend(handles=handles, loc="upper right")
-    ylabel = "CACF" if cfg.collapse == "all_lags" else r"CACF ($\Delta\nu$ lags)"
+    ylabel = {"all_lags": "CACF", "autocovariance": r"mean $|$ACV$|$"}.get(
+        cfg.collapse, r"CACF ($\Delta\nu$ lags)")
     ax.set(xlabel=_freq_label(), ylabel=ylabel)
 
 
 @_aa_style
 def plot_acf(method):
-    """Save ACF: spectrum, CACF curves with thresholds and fits, and optionally the 2D ACF
-    (plot_2dacf) and the comb check (plot_comb_check). With all four panels: a 2 x 2 figure
-    12 cm wide (A&A side caption), y axes of the right column on the right; otherwise one
-    8.8 cm column.
-
-    Args:
-        method: NumaxFromACF after compute().
-    """
+    """Save <name>.png for the ACF / ACV method: spectrum, curves and fits, optional 2D ACF and comb check."""
     cfg, results = method.cfg, method.results
     show_map, show_wk = cfg.plot_2dacf is not False, bool(cfg.plot_comb_check)
     if show_map and show_wk:
@@ -296,18 +268,13 @@ def plot_acf(method):
     if show_wk:
         plot_comb_check_panel(panels["wk"], method)
     fig.tight_layout()
-    _save(fig, method.config, method.id, "ACF")
+    _save(fig, method.config, method.id, method.name)
 
 
 # --------------------------------------------------------------------------------------
 @_aa_style
 def plot_cov(method):
-    """Save CoVs: CoV curves, thresholds, fits and the CoV upper limit; with plot_comb_check,
-    the comb-check diagnostic below.
-
-    Args:
-        method: NumaxFromCoV after compute().
-    """
+    """Save CoVs.png: CoV curves, thresholds, fits and the CoV upper limit, optional comb check."""
     cfg, results = method.cfg, method.results
     if cfg.plot_comb_check:
         fig, (ax, ax_wk) = plt.subplots(2, 1, figsize=(COLUMN_WIDTH, 4.8),
@@ -357,23 +324,18 @@ STYLES = {  # label substring -> (line style, colour, legend label); first match
     "combined": ("-", "k", r"$\nu_\mathrm{max}$ (mean)"),
     "CoVscan_ACF": ((0, (1, 1)), "darkorange", r"$\nu_\mathrm{max}^\mathrm{CoV\,scan}$ (ACF)"),
     "CoVscan_CoV": ((0, (1, 1)), "saddlebrown", r"$\nu_\mathrm{max}^\mathrm{CoV\,scan}$ (CoV)"),
+    "CoVscan_ACV": ((0, (1, 1)), "cadetblue", r"$\nu_\mathrm{max}^\mathrm{CoV\,scan}$ (ACV)"),
+    "ACV": ((0, (5, 1, 1, 1)), "dodgerblue", r"$\nu_\mathrm{max}^\mathrm{ACV}$"),
     "CoV": ((0, (3, 1, 1, 1)), "mediumorchid", r"$\nu_\mathrm{max}^\mathrm{CoV}$"),
     "2DACF": ((0, (5, 1)), "forestgreen", r"$\nu_\mathrm{max}^\mathrm{ACF}$"),
-    "SR_logg_teff": ((0, (1, 5)), "dodgerblue", r"$\nu_\mathrm{max}^{gT_\mathrm{eff}^{-1/2}}$"),
-    "SR": ((0, (1, 5)), "dodgerblue", r"$\nu_\mathrm{max}^\mathrm{SR}$"),
+    "SR_logg_teff": ((0, (1, 5)), "dimgray", r"$\nu_\mathrm{max}^{gT_\mathrm{eff}^{-1/2}}$"),
+    "SR": ((0, (1, 5)), "dimgray", r"$\nu_\mathrm{max}^\mathrm{SR}$"),
 }
 
 
 @_aa_style
 def plot_spectrum_with_all_numax_estimates(psd, star, numax_estimates, config):
-    """Save full_spectrum_with_all_estimates.
-
-    Args:
-        psd: PSDData.
-        star: StarInfo.
-        numax_estimates: {label: ufloat}.
-        config: ProcessingConfig.
-    """
+    """Save full_spectrum_with_all_estimates: the PSD with every numax estimate."""
     fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 2.6))
     ax.loglog(psd.frequency, psd.psd, c="gray", lw=0.4, rasterized=True)
     for label, numax in numax_estimates.items():
@@ -396,15 +358,7 @@ def plot_spectrum_with_all_numax_estimates(psd, star, numax_estimates, config):
 # --------------------------------------------------------------------------------------
 @_aa_style
 def plot_psps(curves, config, target):
-    """Save PSPS: power spectrum of the power spectrum around each method's numax against
-    2/t, so the strongest peak (period Delta-nu / 2, Viani et al. 2019) sits at Delta-nu
-    (dotted: the Delta-nu estimate).
-
-    Args:
-        curves: [(label, colour, numax [muHz], psps dict from artefacts.psps)].
-        config: ProcessingConfig.
-        target: star name.
-    """
+    """Save PSPS.png: the PSPS around each method's numax, with the Delta-nu estimate."""
     fig, ax = plt.subplots(figsize=(COLUMN_WIDTH, 2.8))
     d_max = max(c[3]["dnu"] for c in curves)
     lo, hi = 0.4 * d_max, 2.8 * d_max
@@ -427,22 +381,8 @@ def plot_psps(curves, config, target):
 # --------------------------------------------------------------------------------------
 @_aa_style
 def plot_comb_scan(r, rel_power, frequency, name, config, target):
-    """Save CombScan_<name>: one comb scan (see comb_scan.py); the legend of the top panel names
-    the lines: guess numax (the ACF / CoV estimate), shifted numax (the power-excess peak the scan
-    was re-centred on), comb centre (the fitted centre).
-
-    Panels: relative power around numax; local 2D ACF (r / sd(r), lag in Delta-nu of the
-    shifted numax) with the lag bands (red = correlation, blue = anticorrelation, numbered
-    1 = D/4 ... 9 = 9D/4, +- 0.1 D); the collapsed profiles with the Gaussian fit of the deciding
-    (integer) one.
-
-    Args:
-        r: dict from comb_scan.comb_scan.
-        rel_power: relative power used for the scan.
-        frequency: frequency grid [muHz].
-        name: "ACF" or "CoV".
-        config: ProcessingConfig.
-        target: star name.
+    """Save CombScan_<name>.png: spectrum segment, local 2D ACF with the lag bands, and the
+    profiles with the comb fit and the ACV check (right axis).
     """
     numax, centres = r["numax"], r["centres"]
     fig, axs = plt.subplots(3, 1, figsize=(COLUMN_WIDTH, 5.6), sharex=True,
@@ -484,6 +424,18 @@ def plot_comb_scan(r, rel_power, frequency, name, config, target):
         xs = np.linspace(centres[0], centres[-1], 400)
         ax.plot(xs, gaussian(xs, *r["popt"]), c="tab:red", lw=0.9, label="fit (integer)")
         ax.axvline(r["numax_comb"].n, c="tab:red", lw=0.7, ls=":")
+    acv = r.get("acv")
+    if acv is not None:                         # ACV check: own axis (z can be much larger)
+        ax2 = ax.twinx()
+        ax2.plot(centres, acv["z"], c="dodgerblue", lw=0.8)
+        if acv["popt"] is not None:
+            xs = np.linspace(centres[0], centres[-1], 400)
+            ax2.plot(xs, gaussian(xs, *acv["popt"]), c="dodgerblue", lw=0.8, ls="--")
+            ax2.axvline(acv["centre"].n, c="dodgerblue", lw=0.7, ls=":")
+        ax2.set_ylabel(r"$z_\mathrm{ACV}$", color="dodgerblue")
+        ax2.tick_params(axis="y", colors="dodgerblue")
+        ax.plot([], [], c="dodgerblue", lw=0.8, label=f"ACV (peak $z$ {acv['peak_z']:.1f})"
+                if acv["popt"] is not None else "ACV (no fit)")
     ax.legend(loc="upper right", fontsize=5, frameon=True, framealpha=0.8, edgecolor="none")
     ax.set(xlabel=_freq_label("window centre"), ylabel="$z$")
     for i, ax in enumerate(axs):
@@ -493,6 +445,9 @@ def plot_comb_scan(r, rel_power, frequency, name, config, target):
             ax.axvline(r["scan_centre"], c="0.4", lw=0.7, ls="-.", label=r"shifted $\nu_\mathrm{max}$" if top else None)
         if r["popt"] is not None and i < 2:
             ax.axvline(r["numax_comb"].n, c="tab:red", lw=0.7, ls=":", label="comb centre" if top else None)
+        if r.get("acv") is not None and r["acv"]["popt"] is not None and i < 2:
+            ax.axvline(r["acv"]["centre"].n, c="dodgerblue", lw=0.7, ls=":",
+                       label="ACV centre" if top else None)
     axs[0].legend(loc="upper right", fontsize=5, frameon=True, framealpha=0.8, edgecolor="none")
     fig.tight_layout(h_pad=0.4)
     _save(fig, config, target, f"CombScan_{name}")
@@ -502,20 +457,7 @@ def plot_comb_scan(r, rel_power, frequency, name, config, target):
 # --------------------------------------------------------------------------------------
 @_aa_style
 def plot_cov_scan(r, rel_power, frequency, name, config, target):
-    """Save CovScan_<name>: the CoV scan (see cov_scan.py), 2 x 1.
-
-    Top: the spectrum segment (P / median and smoothed). Bottom: CoV per window against the
-    window centre, with the Gaussian fit, the white-noise level and the significance
-    threshold. Lines: guess numax, shifted numax (power-excess peak), CoV centre (fit).
-
-    Args:
-        r: dict from cov_scan.cov_scan (with "significant").
-        rel_power: relative power P / median - 1.
-        frequency: frequency grid [muHz].
-        name: "ACF" or "CoV".
-        config: ProcessingConfig.
-        target: star name.
-    """
+    """Save CovScan_<name>.png: spectrum segment and the CoV per window with fit and threshold."""
     centres, n = r["centres"], r["n"]
     fig, axs = plt.subplots(2, 1, figsize=(COLUMN_WIDTH, 4.0), sharex=True,
                             gridspec_kw=dict(height_ratios=[1, 1]))

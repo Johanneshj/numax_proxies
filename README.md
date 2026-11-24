@@ -3,16 +3,18 @@
 Estimate **ν<sub>max</sub>**, the frequency of maximum oscillation power of solar-like
 oscillators, from a power spectrum or a light curve (Kepler, TESS, or any time series).
 
-Two model-independent methods, each run over a grid of binning and smoothing settings:
+Model-independent methods, each run over a grid of binning and smoothing settings:
 
 * **ACF** – collapsed autocorrelation (Huber+2009, Viani+2019): how regular the power is
   within a frequency bin.
 * **CoV** – coefficient of variation (Bell+2019, Viani+2019): std / mean of the power in a bin.
+* **ACV** (optional) – collapsed autocovariance: the ACF without dividing by the bin's own
+  variance, so it responds to regularity and power together.
 
 ν<sub>max</sub> from **scaling relations** (stellar parameters from the YAML file and/or
 Gaia DR3) is also available.
 
-> ⚠️ **Known limitations (0.7.0).** Significance is tested per bin (no look-elsewhere
+> ⚠️ **Known limitations (0.8.0).** Significance is tested per bin (no look-elsewhere
 > correction), and the reported uncertainties are formal fit errors, which are too small.
 
 ---
@@ -39,6 +41,7 @@ from numax_proxies import NumaxProxies
 proxy = NumaxProxies.read_yaml("examples/KIC1872517.yaml").run()
 proxy.compute_numax_from_acf()
 proxy.compute_numax_from_CoV()
+proxy.compute_numax_from_acv()   # optional
 proxy.plotting()
 print(proxy.results)        # label, numax, numax_err
 ```
@@ -70,6 +73,9 @@ Show progress with `logging.basicConfig(level=logging.INFO)`.
      its white-noise mean subtracted (white noise ≈ 0):
      * `all_lags` (default): mean |r(k)| over all lags.
      * `delta_nu`: mean r(k) in lag bands around multiples of Δν(ν<sub>c</sub>).
+   * ACV: mean |ACF(k)| / n over all lags, not divided by the zero lag, minus its white-noise
+     mean. It uses the `ACF_CONFIG` settings. Because it keeps the power, it still finds an
+     envelope where a few tall modes dominate a bin and the ACF's r(k) is washed out.
 5. **Smoothing** – running mean over `smoothing_factor` × envelope FWHM.
 6. **Significance** – each bin is compared with a white-noise threshold (95 % or 99 %) that
    depends only on the number of points in the bin. The thresholds are pre-computed
@@ -103,7 +109,14 @@ With `comb_scan: true`, each method's final ν<sub>max</sub> is checked for a re
 4. Without a significant comb the estimate is rejected: the grid fits are repeated with one
    FWHM around it excluded (`comb_scan_max_refits` times), then ν<sub>max</sub> = NaN.
 
-Output: `CombScan_ACF.png`, `CombScan_CoV.png` and `<target>_comb_scan.txt`.
+**ACV check.** The same windows and bands are also collapsed on the autocovariance (the window
+ACF not divided by its own variance, in units of the white-noise variance). This separate check
+gets its own Gaussian fit. Significant if its peak z ≥ `comb_scan_acv_threshold` (5: ≈ 1 % false
+alarms on white noise, but it also responds to tall spikes). It finds envelopes where a few
+dominant modes hide the comb. Its centre (background-corrected with `background_correction`) is
+reported as `numax_ACVscan_<method>`.
+
+Output: `CombScan_<method>.png` (ACV check on the right axis) and `<target>_comb_scan.txt`.
 
 ### 📊 CoV scan (optional)
 
@@ -126,7 +139,8 @@ The CoV-scan centres are reported as their own estimates (`numax_CoVscan_ACF`,
 
 `results` (and `<target>_results.txt`) also hold **`numax_combined`**: the mean of the available
 seismic estimates (ACF, CoV and the CoV-scan centres; rejected ones left out), with their spread
-(standard deviation) as the uncertainty.
+(standard deviation) as the uncertainty. The ACV and the ACV-check estimates are reported but not
+included.
 
 ---
 
@@ -154,7 +168,8 @@ A red giant (Kepler LC) and a main-sequence star (Kepler SC), with `comb_scan`, 
 * **ACF**: spectrum, 2D ACF, collapsed ACF and the PSPS comb check.
 * **CoV**: CoV curves and the PSPS comb check.
 * **Comb scan** (of the ACF ν<sub>max</sub>): spectrum segment, local 2D ACF with the lag bands
-  (red: correlation, blue: anticorrelation), and the collapsed profiles with the Gaussian fit.
+  (red: correlation, blue: anticorrelation), and the collapsed profiles with the Gaussian fit;
+  the ACV check in blue on the right axis.
 * **CoV scan** (of the ACF ν<sub>max</sub>): spectrum segment and the CoV per window with the
   noise level, the threshold and the Gaussian fit.
 
@@ -206,6 +221,7 @@ the YAML file. See `examples/KIC1872517.yaml` for a complete file.
 | comb_scan_width, comb_scan_span | 4.0, 2.0 | window width [Δν]; scan range ν<sub>max</sub> ± span × envelope FWHM |
 | comb_scan_threshold, comb_scan_tolerance | 5.0, 0.1 | minimum peak z; convergence [envelope FWHM] |
 | comb_scan_max_iterations, comb_scan_max_refits | 5, 3 | scans per re-centring; refits after rejections |
+| comb_scan_acv_threshold | 5.0 | ACV check in the comb scan: minimum peak z |
 | cov_scan | false | CoV scan of each final ν<sub>max</sub>: power-excess check, own estimate |
 | cov_scan_width, cov_scan_span | 3.0, 2.0 | window width [Δν]; scan range ± span × envelope FWHM |
 | cov_scan_threshold, cov_scan_max_refits | 3.6, 1 | minimum peak z; refits after a non-significant scan |
@@ -221,6 +237,8 @@ the YAML file. See `examples/KIC1872517.yaml` for a complete file.
 | results_directory | results | |
 
 ### ACF_CONFIG / COV_CONFIG
+The ACV method uses `ACF_CONFIG`.
+
 | key | default | description |
 |---|---|---|
 | min_freq, max_freq | 1.0, null | frequency range [µHz] |
@@ -248,9 +266,10 @@ the YAML file. See `examples/KIC1872517.yaml` for a complete file.
 ```
 <results_directory>/<target>/
   ACF_info/all_data.pkl.gz      every grid setting (curves, FAP, fit)
+  ACV_info/all_data.pkl.gz      (ACV method)
   CoV_info/all_data.pkl.gz
   ACF_info/numax_estimates.txt  numax per setting
-  figures/                      ACF, CoVs, PSPS, CombScan_*, CovScan_*, lc_and_pg, full_spectrum_with_all_estimates
+  figures/                      ACF, ACV, CoVs, PSPS, CombScan_*, CovScan_*, lc_and_pg, full_spectrum_with_all_estimates
   <target>_results.txt          all estimates, incl. numax_combined
   <target>_comb_scan.txt        comb scan per method (comb_scan: true)
   <target>_cov_scan.txt         CoV scan per method (cov_scan: true)

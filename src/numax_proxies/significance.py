@@ -1,16 +1,8 @@
-"""False-alarm thresholds for the ACF and CoV methods.
+"""Per-bin white-noise thresholds (FAP) for the ACF, ACV and CoV methods.
 
-fap_tables.json holds, for bins of N = 4, 8, ..., 65536 independent chi^2_2 points, the
-95th and 99th percentiles of the RAW (unsmoothed) statistic of white noise, from 1e6
-simulated bins per N (scripts/make_fap_tables.py). They only depend on N. For the ACF
-('all_lags') the statistic is MCC - mu0(N); mu0(N), the white-noise mean MCC, is stored too.
-The threshold of a bin is interpolated in log(N) at its actual number of points.
-Bins with N < 4 get no threshold (NaN: never significant); N above the table uses the
-last entry (the thresholds have converged there).
-
-These are PER-BIN thresholds: a spectrum with many bins will exceed one of them
-somewhere by chance. They assume independent chi^2_2 points, i.e. a PSD that is not
-oversampled and not averaged.
+The thresholds come from simulated white-noise bins (fap_tables.json, made by
+scripts/make_fap_tables.py) and depend only on the number of points N per bin. They are
+per-bin thresholds and assume a PSD that is not oversampled or averaged.
 """
 import json
 from functools import lru_cache
@@ -27,34 +19,21 @@ LEVELS = {"95p0": 95.0, "99p0": 99.0}
 
 @lru_cache(maxsize=1)
 def load_tables() -> dict:
-    """Read fap_tables.json (cached).
-
-    Returns:
-        {"N": array, "ACF": {"95": array, "99": array, "mu0": array},
-        "CoV": {"95": array, "99": array}}.
-    """
+    """Read fap_tables.json (cached)."""
     raw = json.loads(resources.files("numax_proxies").joinpath("fap_tables.json").read_text())
     return {"N": np.asarray(raw["N"], dtype=float),
             **{m: {k: np.asarray(v, dtype=float) for k, v in raw[m].items()}
-               for m in ("ACF", "CoV")}}
+               for m in ("ACF", "CoV", "ACV") if m in raw}}
 
 
 def table_threshold(method: str, n_points, threshold: str) -> NDArray:
-    """Per-bin white-noise threshold from the FAP tables.
-
-    Args:
-        method: "ACF" or "CoV".
-        n_points: number of points per bin (scalar or array).
-        threshold: "95p0" or "99p0".
-
-    Returns:
-        Threshold per bin; NaN for N < 4. Interpolated in log N (CoV), or in log value vs
-        log N (ACF: thresholds fall ~ N^-1/2, a straight line in log-log).
+    """Threshold per bin for method "ACF", "ACV" or "CoV" at level "95p0" or "99p0",
+    interpolated at each bin's number of points (NaN for N < 4).
     """
     if threshold not in LEVELS:
         raise ValueError(f"FAP_threshold must be one of {list(LEVELS)}, got {threshold!r}")
     t = load_tables()
-    return _interp_n(t["N"], t[method][f"{LEVELS[threshold]:g}"], n_points, log_y=method == "ACF")
+    return _interp_n(t["N"], t[method][f"{LEVELS[threshold]:g}"], n_points, log_y=method != "CoV")
 
 
 def _interp_n(n_table, y_table, n_points, log_y: bool) -> NDArray:
@@ -68,31 +47,14 @@ def _interp_n(n_table, y_table, n_points, log_y: bool) -> NDArray:
     return np.where(N >= n_table[0], out, np.nan)
 
 
-def acf_noise_mean(n_points) -> NDArray:
-    """White-noise mean of the MCC (mean |r(k)| over all lags) for bins of n_points points.
-
-    Args:
-        n_points: number of points per bin (scalar or array).
-
-    Returns:
-        mu0 per bin from the simulations, interpolated in log mu0 vs log N; NaN for N < 4.
-    """
+def acf_noise_mean(n_points, method: str = "ACF") -> NDArray:
+    """White-noise mean mu0 of the ACF ('all_lags') or ACV statistic for bins of n_points points."""
     t = load_tables()
-    return _interp_n(t["N"], t["ACF"]["mu0"], n_points, log_y=True)
+    return _interp_n(t["N"], t[method]["mu0"], n_points, log_y=True)
 
 
 def add_faps(results: dict, method: str, cfg) -> dict:
-    """Add the threshold curve "fap" to every grid setting (in place).
-
-    Args:
-        results: {setting: result dict}.
-        method: "ACF" or "CoV".
-        cfg: ACFConfig or COVConfig (FAP_threshold; collapse for the ACF).
-
-    Returns:
-        results. ACF delta_nu: z null_sd (analytic; the statistic already has its
-        white-noise mean removed); otherwise the tables.
-    """
+    """Add the threshold curve "fap" to every grid setting (in place)."""
     from scipy.stats import norm
 
     gaussian = method == "ACF" and getattr(cfg, "collapse", "all_lags") == "delta_nu"
@@ -106,18 +68,7 @@ def add_faps(results: dict, method: str, cfg) -> dict:
 
 
 def significant_near(centres, raw, fap, numax, n_fwhm: float = 1.0) -> bool:
-    """Is a bin within n_fwhm envelope FWHM of numax significant?
-
-    Args:
-        centres: bin centres [muHz].
-        raw: raw (unsmoothed) statistic per bin.
-        fap: threshold per bin (or scalar).
-        numax: frequency to check [muHz].
-        n_fwhm: half-width of the window in envelope FWHM.
-
-    Returns:
-        True if any bin in the window has raw >= fap.
-    """
+    """True if a bin within n_fwhm envelope FWHM of numax is above its threshold."""
     if numax is None or not np.isfinite(numax) or numax <= 0:
         return False
     x = np.asarray(centres, dtype=float)

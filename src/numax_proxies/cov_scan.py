@@ -1,20 +1,8 @@
-"""CoV scan: a power-excess sanity check of a fitted numax, independent of regularity.
+"""CoV scan: checks that there is excess power (not necessarily regular) around a fitted numax.
 
-The comb scan asks "is there a regular comb here?"; the CoV scan asks "is there excess
-variance here?". It responds to oscillations whose comb the comb scan cannot see (very sharp
-modes, mixed modes, missing modes), but also to artefacts and humps, so the two are read
-together.
-
-Around the guess numax:
-  1. re-centre on the power excess (comb_scan.excess_peak: the maximum of P / median smoothed
-     over one envelope FWHM within +- span FWHM) = the shifted numax
-  2. windows of constant width `width` x Dnu (Dnu of the shifted numax), centres every Dnu / 4
-     over the shifted numax +- span FWHM
-  3. per window: CoV = std / mean of all n points of P / median (the spectrum normalised once
-     at the start of the pipeline; no smoothing). White noise (chi^2_2): mean 1 - 1/n, sd
-     1/sqrt(n) (checked by simulation), so z = (CoV - 1 + 1/n) sqrt(n)
-  4. Gaussian (with offset, amplitude >= 0) fit to the z profile; significant if its peak
-     z >= threshold; its centre is the CoV-scan numax.
+Re-centres on the power excess, computes the CoV of P / median in windows of constant width,
+converts it to z against white noise and fits a Gaussian. Significant if the peak z is above
+the threshold; the fitted centre is the CoV-scan numax.
 """
 import numpy as np
 from uncertainties import ufloat
@@ -24,19 +12,10 @@ from .seismic import delta_nu, envelope_fwhm
 
 
 def cov_scan(frequency, rel_power, numax, width=3.0, span=2.0):
-    """CoV scan around the power excess near the guess numax.
+    """Run the CoV scan around numax.
 
-    Args:
-        frequency: uniform frequency grid [muHz].
-        rel_power: relative power P / running median - 1.
-        numax: guess numax [muHz] (the ACF / CoV estimate).
-        width: window width [Delta-nu of the shifted numax].
-        span: re-centring range and scan range, +- span x envelope FWHM.
-
-    Returns:
-        dict (centres, cov, z, n, numax (the guess), scan_centre (the shifted numax), dnu,
-        fwhm, width, popt, numax_cov (ufloat; NaN if no fit), peak_z, offset = numax_cov /
-        numax - 1), or None if no window fits.
+    Returns a dict with the windows (centres, cov, z), the shifted numax (scan_centre), the fit
+    (popt, numax_cov, peak_z), or None if the scan does not fit in the spectrum.
     """
     frequency = np.asarray(frequency, dtype=float)
     rel_power = np.asarray(rel_power, dtype=float)
