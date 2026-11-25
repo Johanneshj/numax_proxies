@@ -514,12 +514,14 @@ ENTROPY_COLOURS = {"power": "#E7298A", "peaks": "#8C510A"}    # pink, brown
 def plot_entropy_check(checks, name, config, target):
     """Save Entropy_<name>.png (one column): the échelle diagram of the power window at the power
     version's best spacing (P / median smoothed over Dnu / 100, the peaks version's peaks circled),
-    p_k of both versions, and their normalized entropy spectra (median 0, FAP threshold -1).
+    p_k of both versions (filled bars, with a smoothed curve), and their normalized entropy spectra
+    (median 0, FAP threshold -1).
     checks = {version: entropy check} (each version in its own window).
     """
     from matplotlib.gridspec import GridSpec
     from matplotlib.ticker import MaxNLocator
     from scipy.ndimage import uniform_filter1d
+    from matplotlib.colors import to_rgba
     from .entropy_check import bin_index, fold_exact, folded
     leg = dict(fontsize=5, frameon=False, framealpha=0, ncol=1)
     fap = f"{100 * config.entropy_check_fap:g} {_pct()} FAP"
@@ -569,7 +571,8 @@ def plot_entropy_check(checks, name, config, target):
         else:
             q = folded(bin_index(pk, np.array([D]), nb), nb, np.ones(pk.size))[0]
             x, w, c = pk, np.ones(pk.size), None
-        ax_p.stairs(q, edges, color=ENTROPY_COLOURS[v], lw=0.8, label=v)
+        ax_p.bar(edges[:-1], q, width=D / nb, align="edge", label=v, lw=0.8,   # bins: filled bars
+                 color=to_rgba(ENTROPY_COLOURS[v], 0.25), edgecolor=ENTROPY_COLOURS[v])
         ax_p.plot(xs, _circular_density(x % D / D, w, c, 8 * nb, 4.0) / nb,
                   c=ENTROPY_COLOURS[v], lw=0.8)
         top_p = max(top_p, q.max())
