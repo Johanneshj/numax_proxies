@@ -8,6 +8,7 @@
     proxy.plotting()
     proxy.results                                  # label, numax, numax_err (incl. numax_combined)
     proxy.comb_scan_table, proxy.cov_scan_table    # with CONFIG.comb_scan / cov_scan
+    proxy.entropy_check_table                      # with CONFIG.entropy_check
 
 The running median and relative power of a spectrum are computed once and shared.
 """
@@ -51,6 +52,7 @@ class NumaxProxies:
         self.dnu_estimates = {}
         self.comb_scan_results = {}
         self.cov_scan_results = {}
+        self.entropy_check_results = {}
         self._medians = {}                   # (id(power), factor) -> (power, running median)
         self._relative = {}                  # (id(power), factor) -> (power, P / median - 1)
         self._checkers = {}                  # (id(power), factor) -> (power, CombChecker)
@@ -211,6 +213,8 @@ class NumaxProxies:
         method.compute()
         if self.config.cov_scan:                         # on the method's own estimate
             self._cov_scan(method, label, cfg.plot)
+        if self.config.entropy_check:                    # also on the method's own estimate
+            self._entropy_check(method, cfg.plot)
         if self.config.comb_scan:
             self._comb_scan(method, label, cfg.plot)
         if cfg.plot:
@@ -293,6 +297,67 @@ class NumaxProxies:
         if plot:
             from .plotting import plot_cov_scan
             plot_cov_scan(shown, rel, spec.frequency, name, cfg, self.star.target)
+
+    def _entropy_check(self, method, plot):
+        """Entropy check of the method's numax for every (width, bins, peaks, noise cut) setting, at
+        the initial and the shifted numax (report only).
+
+        numax_H<version>_<method> / dnu_H<version>_<method>: median of the reported numax / D over
+        the significant settings (error: their spread).
+        """
+        from .entropy_check import VERSIONS, entropy_sweep, window_widths
+        cfg, name = self.config, method.name
+        spec = self._spectrum_for_methods()
+        rel = self.relative_power(spec)
+        numax = method.numax_estimate.n
+        widths = window_widths(numax if np.isfinite(numax) else 0.0, cfg.entropy_check_boundary,
+                               cfg.entropy_check_width_power, cfg.entropy_check_width_peaks)
+        sw = entropy_sweep(spec.frequency, rel, numax, widths, cfg.entropy_check_bins,
+                           cfg.entropy_check_peaks, cfg.entropy_check_peak_gate,
+                           cfg.entropy_check_fap)
+        method.entropy_check = sw
+        self.entropy_check_results[name] = sw
+        summary = []
+        for v in VERSIONS:
+            rows = [r for r in sw["rows"] if r["version"] == v]
+            ok = [r for r in rows if np.isfinite(r["numax"])]
+            nu = np.array([r["numax"] for r in ok])
+            self.numax_estimates[f"numax_H{v}_{name}"] = (
+                ufloat(float(np.median(nu)), float(nu.std(ddof=1)) if nu.size > 1 else np.nan)
+                if ok else ufloat(np.nan, np.nan))
+            if ok:
+                self.dnu_estimates[f"dnu_H{v}_{name}"] = float(np.median([r["D"] for r in ok]))
+            summary.append(f"{v} {len(ok)}/{len(rows)} settings"
+                           + (f", numax {np.median(nu):.1f}" if ok else ""))
+        logger.info("%s: entropy check %s (guess %.1f muHz): %s", self.star.target, name,
+                    method.numax_estimate.n, "; ".join(summary))
+        if plot:
+            shown = self._entropy_shown(sw, cfg)
+            if shown:
+                from .plotting import plot_entropy_check
+                plot_entropy_check(shown, name, cfg, self.star.target)
+
+    @staticmethod
+    def _entropy_shown(sw, cfg):
+        """The checks to plot, {version: check}: the middle bin number, the fewest peaks and the
+        first noise cut; the initial window if either version reports it, else the shifted one."""
+        from .entropy_check import VERSIONS, peak_numbers
+        bins = sorted(cfg.entropy_check_bins)
+        nb = bins[len(bins) // 2]
+        n = peak_numbers(sw["widths"]["peaks"], cfg.entropy_check_peaks)[0]
+        g = cfg.entropy_check_peak_gate[0]
+        cut = "none" if g is None else g
+        rows = [r for r in sw["rows"] if r["bins"] == nb
+                and (r["version"] == "power" or (r["peaks"] == n and r["noise_cut"] == cut))]
+        aim = ("none" if any(r["reported"] == "initial" for r in rows)
+               or not any(r["reported"] == "shifted" for r in rows) else "excess")
+        keys = dict(power=(nb, None, None), peaks=(nb, n, g))
+        shown = {}
+        for v in VERSIONS:
+            c = sw["checks"][(v, aim, *keys[v])] or sw["checks"][(v, "none", *keys[v])]
+            if c is not None:
+                shown[v] = c
+        return shown
 
     def _comb_scan(self, method, label, plot):
         """Comb scan of the method's numax; the converged centre becomes the method's numax.
@@ -427,6 +492,9 @@ class NumaxProxies:
             if self.cov_scan_results:
                 self.cov_scan_table.to_csv(self.out_dir / f"{self.star.target}_cov_scan.txt",
                                            index=False)
+            if self.entropy_check_results:
+                self.entropy_check_table.to_csv(
+                    self.out_dir / f"{self.star.target}_entropy_check.txt", index=False)
         return df
 
     @property
@@ -444,6 +512,14 @@ class NumaxProxies:
                          "peak_z": a["peak_z"] if a else np.nan,
                          "significant": c["accepted"] is not None, "n": a["n"] if a else np.nan})
         return pd.DataFrame(rows)
+
+    @property
+    def entropy_check_table(self) -> pd.DataFrame:
+        """Entropy check per method, version and setting (bins, peaks per Dnu): numax, best D,
+        p-value and significant at the initial and the shifted numax, and the reported numax / D.
+        """
+        return pd.DataFrame([dict(method=k, **r) for k, sw in self.entropy_check_results.items()
+                             for r in sw["rows"]])
 
     @staticmethod
     def _acv_columns(c) -> dict:

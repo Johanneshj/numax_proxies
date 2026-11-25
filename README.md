@@ -14,7 +14,7 @@ Model-independent methods, each run over a grid of binning and smoothing setting
 ν<sub>max</sub> from **scaling relations** (stellar parameters from the YAML file and/or
 Gaia DR3) is also available.
 
-> ⚠️ **Known limitations (0.8.0).** Significance is tested per bin (no look-elsewhere
+> ⚠️ **Known limitations (0.9.0).** Significance is tested per bin (no look-elsewhere
 > correction), and the reported uncertainties are formal fit errors, which are too small.
 
 ---
@@ -135,6 +135,19 @@ spikes, so the two are read together.
 The CoV-scan centres are reported as their own estimates (`numax_CoVscan_ACF`,
 `numax_CoVscan_CoV`). Output: `CovScan_ACF.png`, `CovScan_CoV.png`, `<target>_cov_scan.txt`.
 
+### 🔢 Entropy check (optional)
+
+`entropy_check: true` tests each method's ν<sub>max</sub> for a regular spacing (after
+Suárez 2022). A window around ν<sub>max</sub> is folded on trial spacings D (an échelle diagram)
+and the Shannon entropy H(D) of the folded distribution is computed, for the power (mean
+P / median per échelle bin) and for the tallest peaks (2–3 per Δν, at least δν<sub>02</sub>
+apart). A dip in H(D) is significant if it is deeper, relative to the star's own median, than in
+99 % of white-noise windows. Windows: 8 Δν (power) and 6 Δν (peaks) below ν<sub>max</sub> = 300 µHz,
+10 and 8 Δν above. It runs every setting (5–15 bins, every number of peaks) at the initial and the
+shifted ν<sub>max</sub> and reports `numax_H<version>_<method>` and `dnu_H<version>_<method>`
+(medians over the significant settings; not in `numax_combined`).
+Output: `Entropy_<method>.png` and `<target>_entropy_check.txt` (one row per setting).
+
 ### 🎯 One estimate
 
 `results` (and `<target>_results.txt`) also hold **`numax_combined`**: the mean of the available
@@ -225,6 +238,9 @@ the YAML file. See `examples/KIC1872517.yaml` for a complete file.
 | cov_scan | false | CoV scan of each final ν<sub>max</sub>: power-excess check, own estimate |
 | cov_scan_width, cov_scan_span | 3.0, 2.0 | window width [Δν]; scan range ± span × envelope FWHM |
 | cov_scan_threshold, cov_scan_max_refits | 3.6, 1 | minimum peak z; refits after a non-significant scan |
+| entropy_check | false | entropy check of each method's ν<sub>max</sub> (report only) |
+| entropy_check_boundary, entropy_check_width_power, entropy_check_width_peaks | 300, [8, 10], [6, 8] | ν<sub>max</sub> [µHz] between giants and the rest; window [Δν] below / above it |
+| entropy_check_bins, entropy_check_peaks, entropy_check_peak_gate, entropy_check_fap | 5–15, [2, 3], [null], 0.01 | échelle bins; peaks per Δν of window (range); optional noise cut; false-alarm level |
 | background_correction | false | correct each fitted ν<sub>max</sub> for the background slope |
 | plot_psps | false | PSPS.png, Δν diagnostic (Δν estimates in `dnu_estimates`) |
 | psps_oversampling | 10 | zero padding of the PSPS (plots and Δν only; the test uses independent points) |
@@ -269,10 +285,11 @@ The ACV method uses `ACF_CONFIG`.
   ACV_info/all_data.pkl.gz      (ACV method)
   CoV_info/all_data.pkl.gz
   ACF_info/numax_estimates.txt  numax per setting
-  figures/                      ACF, ACV, CoVs, PSPS, CombScan_*, CovScan_*, lc_and_pg, full_spectrum_with_all_estimates
+  figures/                      ACF, ACV, CoVs, PSPS, CombScan_*, CovScan_*, Entropy_*, lc_and_pg, full_spectrum_with_all_estimates
   <target>_results.txt          all estimates, incl. numax_combined
   <target>_comb_scan.txt        comb scan per method (comb_scan: true)
   <target>_cov_scan.txt         CoV scan per method (cov_scan: true)
+  <target>_entropy_check.txt    entropy check per method and setting (entropy_check: true)
 ```
 
 Read a results file with `pickle.load(gzip.open(path))`.
@@ -285,6 +302,7 @@ Read a results file with `pickle.load(gzip.open(path))`.
 python -m pytest                       # unit + regression tests
 python scripts/injection_test.py       # synthetic stars
 python scripts/make_fap_tables.py      # regenerate the FAP tables (~1.5 h)
+python scripts/make_entropy_nulls.py   # regenerate the entropy-check thresholds (~5 min on 30 cores)
 ```
 
 ---
@@ -310,6 +328,8 @@ python scripts/make_fap_tables.py      # regenerate the FAP tables (~1.5 h)
 * Verner & Roxburgh 2011, arXiv:1104.0631 – windowed autocorrelation of the power-to-background spectrum
 * Lund, Chaplin & Kjeldsen 2012, MNRAS 427, 1784 – significance testing of PS⊗PS at low S/N
 * Scargle 1982, ApJ 263, 835 – false-alarm probability of the highest of M independent peaks
+* Suárez 2022, Front. Astron. Space Sci. 9, 953231 – Shannon entropy of échelle diagrams (entropy check)
+* Huber et al. 2010, ApJ 723, 1607 – δν<sub>02</sub> ≈ 0.122 Δν in red giants (peak separation)
 
 **Background and ν<sub>max</sub> systematics**
 * Sreenivas & Bedding 2024, MNRAS (arXiv:2401.17557) – ν<sub>max</sub> from the spectrum divided by

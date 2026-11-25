@@ -111,6 +111,23 @@ class ProcessingConfig:
     cov_scan_threshold: float = 3.6         # min. peak z: 1 % false alarms per scan on white
                                             # noise at width 3 (tall spikes pass at any z!)
     cov_scan_max_refits: int = 1            # refits after a non-significant scan
+    entropy_check: bool = False             # regularity check: échelle entropy (Suárez 2022) of
+                                            # P / median around the shifted numax (report only)
+    entropy_check_boundary: float = 300.0   # numax_init [muHz] between red giants and the rest
+    entropy_check_width_power: list = field(default_factory=lambda: [8.0, 10.0])
+                                            # power version: window [Delta-nu] below / above it
+    entropy_check_width_peaks: list = field(default_factory=lambda: [6.0, 8.0])
+                                            # peaks version: window [Delta-nu] below / above it
+    entropy_check_bins: Union[int, list] = field(default_factory=lambda: list(range(5, 16)))
+                                            # échelle bins per trial spacing (every value is run)
+    entropy_check_peaks: Union[float, list] = field(default_factory=lambda: [2.0, 3.0])
+                                            # peaks per Delta-nu of window (min, max): every
+                                            # integer number of peaks in between is run
+                                            # peaks version: tallest peaks per Delta-nu of window
+    entropy_check_peak_gate: Union[float, None, list] = field(default_factory=lambda: [None])
+                                            # peaks above the noise: ~this many noise peaks pass
+                                            # per window; None: no cut (Suárez); every value is run
+    entropy_check_fap: float = 0.01         # false alarms per check on white noise
     background_correction: bool = False     # numax -= alpha sigma^2 / numax (background slope)
 
     # Delta-nu diagnostic
@@ -161,6 +178,29 @@ class ProcessingConfig:
             raise ValueError("CONFIG.cov_scan_max_refits must be a non-negative integer")
         self.cov_scan_max_refits = int(self.cov_scan_max_refits)
         self.comb_scan_max_iterations = int(self.comb_scan_max_iterations)
+        bins = np.atleast_1d(self.entropy_check_bins)
+        if bins.size == 0 or any(int(b) != b or b < 2 for b in bins):
+            raise ValueError("CONFIG.entropy_check_bins must be integers >= 2")
+        self.entropy_check_bins = [int(b) for b in bins]
+        for name in ("entropy_check_width_power", "entropy_check_width_peaks"):
+            widths = np.atleast_1d(getattr(self, name)).astype(float)
+            if widths.size != 2 or any(not x > 0 for x in widths):
+                raise ValueError(f"CONFIG.{name} must be two positive widths (below, above "
+                                 "entropy_check_boundary)")
+            setattr(self, name, [float(x) for x in widths])
+        if not self.entropy_check_boundary > 0:
+            raise ValueError("CONFIG.entropy_check_boundary must be positive")
+        peaks = np.atleast_1d(self.entropy_check_peaks)
+        if not 1 <= peaks.size <= 2 or any(not p > 0 for p in peaks):
+            raise ValueError("CONFIG.entropy_check_peaks must be one or two positive numbers")
+        self.entropy_check_peaks = [float(peaks.min()), float(peaks.max())]
+        gates = (self.entropy_check_peak_gate if isinstance(self.entropy_check_peak_gate, list)
+                 else [self.entropy_check_peak_gate])
+        if not gates or any(g is not None and not g > 0 for g in gates):
+            raise ValueError("CONFIG.entropy_check_peak_gate must be positive or None (or a list)")
+        self.entropy_check_peak_gate = [None if g is None else float(g) for g in gates]
+        if not 0 < self.entropy_check_fap < 1:
+            raise ValueError("CONFIG.entropy_check_fap must be in (0, 1)")
         if not 0 < self.comb_check_tolerance < 1:
             raise ValueError("CONFIG.comb_check_tolerance must be in (0, 1)")
         regions = self.exclude_regions or []

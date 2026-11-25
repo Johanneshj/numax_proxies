@@ -52,6 +52,11 @@ def _freq_label(name: str = "frequency") -> str:
     return f"{name} [{_mu()}Hz]"
 
 
+def _pct() -> str:
+    """Percent sign that also works under LaTeX."""
+    return r"\%" if plt.rcParams["text.usetex"] else "%"
+
+
 def _psd_label() -> str:
     """Axis label "PSD [ppm²/μHz]"."""
     return f"PSD [ppm$^2$/{_mu()}Hz]"
@@ -488,3 +493,106 @@ def plot_cov_scan(r, rel_power, frequency, name, config, target):
         ax.legend(loc="upper right", fontsize=5, frameon=True, framealpha=0.8, edgecolor="none")
     fig.tight_layout(h_pad=0.4)
     _save(fig, config, target, f"CovScan_{name}")
+
+
+# --------------------------------------------------------------------------------------
+def _circular_density(phase, weights, counts, n_fine, smooth):
+    """Density over [0, 1) of folded phases: fine histogram (mean per bin if counts) smoothed circularly."""
+    from scipy.ndimage import gaussian_filter1d
+    k = np.minimum((phase * n_fine).astype(int), n_fine - 1)
+    h = np.bincount(k, weights, n_fine)
+    if counts is not None:
+        h = h / np.maximum(np.bincount(k, counts, n_fine), 1)
+    h = gaussian_filter1d(h, smooth, mode="wrap")
+    return h / h.mean()
+
+
+ENTROPY_COLOURS = {"power": "#E7298A", "peaks": "#8C510A"}    # pink, brown
+
+
+@_aa_style
+def plot_entropy_check(checks, name, config, target):
+    """Save Entropy_<name>.png (one column): the échelle diagram of the power window at the power
+    version's best spacing (P / median smoothed over Dnu / 100, the peaks version's peaks circled),
+    p_k of both versions, and their normalized entropy spectra (median 0, FAP threshold -1).
+    checks = {version: entropy check} (each version in its own window).
+    """
+    from matplotlib.gridspec import GridSpec
+    from matplotlib.ticker import MaxNLocator
+    from scipy.ndimage import uniform_filter1d
+    from .entropy_check import bin_index, fold_exact, folded
+    leg = dict(fontsize=5, frameon=False, framealpha=0, ncol=1)
+    fap = f"{100 * config.entropy_check_fap:g} {_pct()} FAP"
+    versions = [v for v in ("power", "peaks") if checks.get(v) and np.isfinite(checks[v][v]["D"])]
+    if not versions:
+        return
+    r = checks[versions[0]]                                  # the échelle window (power first)
+    D, dnu, nb = r[versions[0]]["D"], r["dnu"], r["n_bins"]
+    fig = plt.figure(figsize=(COLUMN_WIDTH, 13 / 2.54))
+    outer = GridSpec(2, 1, figure=fig, height_ratios=[2.3, 1.0], hspace=0.22)
+    top = outer[0].subgridspec(2, 1, height_ratios=[1.6, 0.7], hspace=0)
+    ax_e = fig.add_subplot(top[0])
+    ax_p = fig.add_subplot(top[1], sharex=ax_e)
+    ax_h = fig.add_subplot(outer[1])
+    # échelle: whole rows (completed from just outside the window), smoothed for display only
+    fd, rd = r["display"]
+    df = fd[1] - fd[0]
+    smooth = max(1, int(round(dnu / 100 / df)))
+    rd = uniform_filter1d(rd, smooth, mode="nearest")
+    lo, hi = np.floor(r["window"][0] / D) * D, np.ceil(r["window"][1] / D) * D
+    keep = (fd >= lo) & (fd < hi)
+    f, rel = fd[keep], rd[keep]
+    n_x = max(1, int(round(D / df)))
+    row = np.floor(f / D).astype(int)
+    row0 = row.min()
+    flat = (row - row0) * n_x + np.minimum((f % D / D * n_x).astype(int), n_x - 1)
+    size = (row.max() - row0 + 1) * n_x
+    img = (np.bincount(flat, rel + 1.0, size) / np.maximum(np.bincount(flat, None, size), 1)
+           ).reshape(-1, n_x)
+    ax_e.imshow(img, origin="lower", aspect="auto", cmap="Blues", vmin=0,
+                vmax=np.percentile(img[img > 0], 99.5), rasterized=True, interpolation="none",
+                extent=[0, D, row0 * D, (row.max() + 1) * D])
+    pk = checks["peaks"]["peak_freqs"] if "peaks" in versions else np.array([])
+    ax_e.plot(pk % D, np.floor(pk / D) * D + 0.5 * D, "o", ms=2.5, mfc="none", mec="orangered",
+              mew=0.6, ls="none")
+    ax_e.set(ylabel=_freq_label(r"frequency ($\nu$)"), ylim=(row0 * D, (row.max() + 1) * D))
+    ax_e.tick_params(labelbottom=False)
+    # p_k of both versions on the same spacing, with a smoothed version
+    fw, rw = checks["power"]["spectrum"] if "power" in versions else r["spectrum"]
+    edges = np.linspace(0, D, nb + 1)
+    xs = (np.arange(8 * nb) + 0.5) * D / (8 * nb)
+    top_p = 0.0
+    for v in versions:
+        if v == "power":
+            q = fold_exact(fw, rw + 1.0, np.array([D]), nb)[0]
+            x, w, c = fw, uniform_filter1d(rw, smooth, mode="nearest") + 1.0, np.ones(fw.size)
+        else:
+            q = folded(bin_index(pk, np.array([D]), nb), nb, np.ones(pk.size))[0]
+            x, w, c = pk, np.ones(pk.size), None
+        ax_p.stairs(q, edges, color=ENTROPY_COLOURS[v], lw=0.8, label=v)
+        ax_p.plot(xs, _circular_density(x % D / D, w, c, 8 * nb, 4.0) / nb,
+                  c=ENTROPY_COLOURS[v], lw=0.8)
+        top_p = max(top_p, q.max())
+    ax_p.set(xlim=(0, D), ylim=(0, 1.45 * top_p), ylabel="$p_k$",
+             xlabel=_freq_label(r"$\nu$ mod $\Delta\nu_\mathrm{best}$"))
+    ax_p.yaxis.set_major_locator(MaxNLocator(4, prune="upper"))  # no label at the joint
+    ax_p.legend(loc="upper right", **leg)
+    # normalized entropy spectra: (H - median H) / (median H - FAP level)
+    t = r["trials"]
+    ax_h.axvline(dnu, c="dimgray", lw=0.6, ls=":", label=r"$\Delta\nu_\mathrm{init}$")
+    ax_h.axhline(0, c="k", lw=0.6, zorder=1, label="median $H$")
+    ax_h.axhline(-1, c="orangered", lw=0.8, ls="--", zorder=1, label=fap)
+    ys = []
+    for v in versions:
+        e, tv = checks[v][v], checks[v]["trials"]
+        y = (e["H"] - e["H_baseline"]) / (e["H_baseline"] - e["H_threshold"])
+        ys.append(y)
+        ax_h.plot(tv, y, c=ENTROPY_COLOURS[v], lw=0.7, zorder=2, label=v)
+        ax_h.plot(e["D"], y[np.argmin(np.abs(tv - e["D"]))], "o", ms=3, c=ENTROPY_COLOURS[v],
+                  zorder=3)
+    y_lo = min(min(np.nanmin(y) for y in ys), -1.0)
+    y_hi = max(np.nanmax(y) for y in ys)
+    ax_h.set(xlim=(t[0], t[-1]), ylim=(y_lo - 0.9 * (y_hi - y_lo), y_hi + 0.1 * (y_hi - y_lo)),
+             xlabel=_freq_label("trial spacing $D$"), ylabel="normalized $H$")
+    ax_h.legend(loc="lower right", **leg)
+    _save(fig, config, target, f"Entropy_{name}")
